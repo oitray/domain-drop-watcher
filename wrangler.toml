@@ -1,0 +1,25 @@
+name = "domain-drop-watcher"
+main = "src/worker.ts"
+compatibility_date = "2026-04-22"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+WEBHOOK_HOST_ALLOWLIST_DEFAULT = "*.webhook.office.com,hooks.slack.com,discord.com,discordapp.com"
+
+# Populated by scripts/setup.sh
+[[d1_databases]]
+binding = "DB"
+database_name = "domain-drop-watcher"
+database_id = "PLACEHOLDER_SET_BY_SETUP_SH"
+
+# Populated by scripts/setup.sh
+[[kv_namespaces]]
+binding = "EVENTS"
+id = "PLACEHOLDER_SET_BY_SETUP_SH"
+
+# Populated by scripts/setup.sh
+[[kv_namespaces]]
+binding = "BOOTSTRAP"
+id = "PLACEHOLDER_SET_BY_SETUP_SH"

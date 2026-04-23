@@ -35,7 +35,7 @@ Token scopes verified: D1:Edit, Workers KV Storage:Edit, Workers Scripts:Edit, W
 
 Update these checkboxes as you complete work. Include commit SHA.
 
-- [ ] Phase 1: Repo skeleton + wrangler config
+- [x] Phase 1: Repo skeleton + wrangler config
 - [ ] Phase 2: D1 helpers + schema + budget module
 - [ ] Phase 3: RDAP client + status classifier
 - [ ] Phase 4: Alert channels + webhook SSRF allowlist
@@ -63,4 +63,5 @@ _none yet_
 
 ## Notes for future phases
 
-_none yet_
+- `tsconfig.json` includes `"skipLibCheck": true` — required because `@cloudflare/workers-types` and vitest's transitive `vite`/`tinybench` deps declare conflicting node types. This is standard for CF Workers + vitest setups. Does not affect runtime correctness.
+- Phase 1 commit SHA: see git log
