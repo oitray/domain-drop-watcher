@@ -36,7 +36,7 @@ Token scopes verified: D1:Edit, Workers KV Storage:Edit, Workers Scripts:Edit, W
 Update these checkboxes as you complete work. Include commit SHA.
 
 - [x] Phase 1: Repo skeleton + wrangler config
-- [ ] Phase 2: D1 helpers + schema + budget module
+- [x] Phase 2: D1 helpers + schema + budget module
 - [ ] Phase 3: RDAP client + status classifier
 - [ ] Phase 4: Alert channels + webhook SSRF allowlist
 - [ ] Phase 5: Admin HTTP routes + auth middleware
@@ -65,3 +65,11 @@ _none yet_
 
 - `tsconfig.json` includes `"skipLibCheck": true` — required because `@cloudflare/workers-types` and vitest's transitive `vite`/`tinybench` deps declare conflicting node types. This is standard for CF Workers + vitest setups. Does not affect runtime correctness.
 - Phase 1 commit SHA: `9963351`
+- Phase 2 commit SHA: TBD (set after commit)
+
+## Notes for Phase 3+
+
+- `BudgetReport` in `types.ts` was extended with `headroom: number` (Phase 2 needed it; Phase 1 omitted it).
+- `DomainRow` keeps snake_case field names (matching D1 column names directly) — db.ts does NOT convert to camelCase on output since the existing type uses snake_case. Future phases should use snake_case field access on `DomainRow`.
+- `upsertDomainWithBudgetCheck` uses a recursive CTE to atomically check peak budget and insert. SQLite's `WITH RECURSIVE` default depth limit is 1000; the window is capped at 1440 — Phase 5 (admin routes) should ensure the recursive CTE is only called with D1 (not local SQLite simulators that lack `LIMIT ?` on recursive CTEs). Test this against the actual D1 binding during Phase 9 CI.
+- `pickLeastLoadedOffset` returns the lowest-indexed offset that achieves the minimum peak. The spec example with [0,0,1] returns offset 1 (not 2) because offsets 1–4 all tie at peak=2 and 1 is the lowest.

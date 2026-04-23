@@ -63,5 +63,6 @@ export interface BudgetReport {
   peakBucketMinute: number;
   d1WritesPerDay: number;
   withinFreeTier: boolean;
+  headroom: number;
   warnings: string[];
 }
