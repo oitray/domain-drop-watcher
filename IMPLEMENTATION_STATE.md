@@ -40,7 +40,7 @@ Update these checkboxes as you complete work. Include commit SHA.
 - [x] Phase 3: RDAP client + status classifier
 - [x] Phase 4: Alert channels + webhook SSRF allowlist
 - [x] Phase 5: Admin HTTP routes + auth middleware
-- [ ] Phase 6: Scheduled() cron handler
+- [x] Phase 6: Scheduled() cron handler
 - [ ] Phase 7: Admin dashboard (public/index.html)
 - [ ] Phase 8: Interactive setup wizard (scripts/setup.sh)
 - [ ] Phase 9: README + CI workflow
@@ -69,6 +69,16 @@ _none yet_
 - Phase 3 commit SHA: `2ed1b54`
 - Phase 4 commit SHA: `064289f`
 - Phase 5 commit SHA: `c6e8d54`
+- Phase 6 commit SHA: TBD (updated after commit)
+
+## Notes for Phase 7+
+
+- `scheduled()` is fully implemented in `src/worker.ts`. It imports from `./db`, `./kv`, `./rdap`, `./alerts` — no new deps.
+- **Indeterminate-during-confirmation semantics:** When `lookupDomain` returns `indeterminate` (or throws), the update for that domain preserves the existing `pending_confirm_status` and `pending_confirm_count` unchanged. Transient RDAP outages do NOT reset or advance the confirmation streak. This is deliberate and tested in `test/scheduled.test.ts` ("indeterminate during confirmation" suite).
+- **LIMIT 45** is enforced by `getDueDomains(env.DB, now, 45)`. The D1 mock in `test/scheduled.test.ts` handles both literal (`LIMIT 45`) and parameterized (`LIMIT ?`) SQL so the 45-cap is verified in tests.
+- `recordCheckBatch` receives `pendingConfirmStatus`/`pendingConfirmCount` for every row including indeterminate ones — so the D1 batch always has complete data to write.
+- Phase 7 (dashboard): `public/index.html` will need `handleAdmin` to serve it from the `/` route (currently unhandled — returns 404). Add a `GET /` branch in `admin.ts` that returns the static HTML.
+- Phase 8 (setup wizard): `scripts/setup.sh` is a standalone shell script; it uses `wrangler secret put` and D1 SQL for initialization. No Worker-side changes needed.
 
 ## Notes for Phase 5+
 
