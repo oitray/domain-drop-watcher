@@ -2,7 +2,7 @@ export interface Env {
   DB: D1Database;
   EVENTS: KVNamespace;
   BOOTSTRAP: KVNamespace;
-  ADMIN_TOKEN: string;
+  ADMIN_TOKEN?: string;
   RESEND_API_KEY?: string;
   RESEND_FROM_ADDRESS?: string;
   WEBHOOK_HOST_ALLOWLIST?: string;

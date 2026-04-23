@@ -22,18 +22,6 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-  shellcheck-setup:
-    name: Shellcheck setup.sh
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install shellcheck
-        run: sudo apt-get install -y shellcheck
-
-      - name: Lint setup.sh
-        run: shellcheck scripts/setup.sh
-
   schema-sanity:
     name: Schema parses as valid SQLite
     runs-on: ubuntu-latest

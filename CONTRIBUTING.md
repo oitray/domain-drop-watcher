@@ -8,6 +8,22 @@ cd domain-drop-watcher
 npm install
 ```
 
+## Local dev
+
+Run the Worker against the local wrangler emulator:
+
+```
+npm run dev
+```
+
+No Cloudflare account required for code changes. The emulator starts on
+`http://localhost:8787`. Use `.dev.vars` (copy from `.dev.vars.example`) to
+inject environment bindings locally.
+
+`wrangler deploy` is available for contributors testing deploy behavior against
+a real Cloudflare account, but it is not the documented operator path — operators
+use the one-click deploy button. See README for the operator flow.
+
 ## Run tests
 
 ```
@@ -28,14 +44,10 @@ Both must pass before opening a PR.
   come first. Delete comments that restate the code.
 - **Tests colocated under `test/`**, named `<module>.test.ts`. Use vitest's
   `describe`/`it`/`expect`. No other test framework.
-- **Shell scripts** — `shellcheck scripts/setup.sh` must pass. Any new shell
-  scripts follow the same `set -euo pipefail`, no-eval, quoted-expansions baseline
-  as the existing wizard.
 
 ## PR checklist
 
 - [ ] `npm run typecheck` passes
-- [ ] `npm test` passes (108 tests currently; add tests for new logic)
-- [ ] `shellcheck scripts/setup.sh` passes if `setup.sh` was changed
+- [ ] `npm test` passes (add tests for new logic)
 - [ ] No new runtime dependencies added
 - [ ] No secrets or credentials in any file

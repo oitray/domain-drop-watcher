@@ -1,0 +1,28 @@
+{
+  "name": "domain-drop-watcher",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-04-22",
+  "triggers": { "crons": ["* * * * *"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "domain-drop-watcher"
+    }
+  ],
+  "kv_namespaces": [
+    { "binding": "EVENTS" },
+    { "binding": "BOOTSTRAP" }
+  ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "vars": {
+    "WEBHOOK_HOST_ALLOWLIST_DEFAULT": "*.webhook.office.com,hooks.slack.com,discord.com,discordapp.com",
+    "ADMIN_TOKEN": "",
+    "RESEND_API_KEY": "",
+    "RESEND_FROM_ADDRESS": "",
+    "WEBHOOK_HOST_ALLOWLIST": ""
+  }
+}

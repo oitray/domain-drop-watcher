@@ -58,12 +58,20 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-function checkAuth(req: Request, env: Env): boolean {
+async function resolveAdminToken(env: Env): Promise<string | null> {
+  if (env.ADMIN_TOKEN && env.ADMIN_TOKEN.trim() !== "") return env.ADMIN_TOKEN;
+  const row = await env.DB.prepare("SELECT v FROM config WHERE k = ?").bind("runtime_admin_token").first<{ v: string }>();
+  return row?.v ?? null;
+}
+
+async function checkAuth(req: Request, env: Env): Promise<boolean> {
   const header = req.headers.get("authorization") ?? "";
   const match = /^Bearer (.+)$/i.exec(header);
   if (!match) return false;
   const provided = match[1] ?? "";
-  return timingSafeEqual(provided, env.ADMIN_TOKEN);
+  const token = await resolveAdminToken(env);
+  if (!token) return false;
+  return timingSafeEqual(provided, token);
 }
 
 const VALID_NOTIFY_ON = new Set(["available", "dropping", "expiring", "registered"]);
@@ -602,6 +610,84 @@ async function handleGetEvents(req: Request, env: Env): Promise<Response> {
   return json(events);
 }
 
+const SETUP_CSP =
+  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'";
+
+async function handleSetup(env: Env): Promise<Response> {
+  const existing = await env.DB
+    .prepare("SELECT v FROM config WHERE k = ?")
+    .bind("runtime_admin_token")
+    .first<{ v: string }>();
+
+  if (existing?.v) {
+    const body = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>Setup — domain-drop-watcher</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:540px;margin:80px auto;padding:0 16px;color:#414042}
+  h1{color:#e42e1b}
+  code{background:#f4f4f4;padding:2px 6px;border-radius:3px;font-size:.9em}
+  .box{background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:16px 20px;margin:24px 0}
+</style></head><body>
+<h1>Token already set</h1>
+<div class="box">
+  <p>An admin token is already configured for this deployment. The setup page can only be used once.</p>
+  <p>Use your saved token to access the dashboard, or clear the token by running this SQL against your D1 database:</p>
+  <code>DELETE FROM config WHERE k = 'runtime_admin_token';</code>
+  <p>Then revisit <code>/setup</code> to generate a new one.</p>
+</div>
+</body></html>`;
+    return new Response(body, {
+      status: 403,
+      headers: {
+        "content-type": "text/html;charset=utf-8",
+        "Content-Security-Policy": SETUP_CSP,
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
+  const token = crypto.randomUUID();
+  await env.DB
+    .prepare("INSERT INTO config (k, v) VALUES ('runtime_admin_token', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v")
+    .bind(token)
+    .run();
+
+  const body = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>Setup — domain-drop-watcher</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:540px;margin:80px auto;padding:0 16px;color:#414042}
+  h1{color:#e42e1b}
+  .warn{background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:16px 20px;margin:24px 0;font-weight:600}
+  .token-box{background:#f4f4f4;border:1px solid #ccc;border-radius:6px;padding:12px 16px;font-family:monospace;font-size:1em;word-break:break-all;margin:16px 0}
+  button{background:#e42e1b;color:#fff;border:none;padding:8px 18px;border-radius:4px;cursor:pointer;font-size:.95em}
+  button:active{opacity:.8}
+  a{color:#e42e1b}
+</style></head><body>
+<h1>Admin Token</h1>
+<div class="warn">&#9888; Save this token now — it will NOT be shown again.</div>
+<div class="token-box" id="tok">${token}</div>
+<button onclick="navigator.clipboard.writeText(document.getElementById('tok').textContent).then(()=>{this.textContent='Copied!'})">Copy to clipboard</button>
+<p style="margin-top:32px"><a href="/">Continue to dashboard &rarr;</a></p>
+<hr style="margin:32px 0;border:none;border-top:1px solid #ddd">
+<p style="font-size:.85em;color:#888">
+  This page rendered once. Refreshing returns 403. To reset: run
+  <code>DELETE FROM config WHERE k = 'runtime_admin_token';</code>
+  against your D1 database, then revisit <code>/setup</code>.
+</p>
+</body></html>`;
+
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "text/html;charset=utf-8",
+      "Content-Security-Policy": SETUP_CSP,
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 export async function handleAdmin(
   req: Request,
   env: Env,
@@ -613,6 +699,16 @@ export async function handleAdmin(
 
   if (pathname === "/health" && method === "GET") {
     return json({ ok: true, version: env.VERSION ?? "0.1.0" });
+  }
+
+  if (pathname === "/setup" && method === "GET") {
+    if (env.ADMIN_TOKEN && env.ADMIN_TOKEN.trim() !== "") {
+      return new Response("Setup disabled: ADMIN_TOKEN is set via environment.", {
+        status: 403,
+        headers: { "content-type": "text/plain", "Cache-Control": "no-store" },
+      });
+    }
+    return handleSetup(env);
   }
 
   if ((pathname === "/" || pathname === "/index.html") && method === "GET") {
@@ -634,7 +730,7 @@ export async function handleAdmin(
     );
   }
 
-  if (!checkAuth(req, env)) {
+  if (!(await checkAuth(req, env))) {
     return jsonErr(401, "unauthorized");
   }
 

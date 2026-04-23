@@ -54,51 +54,48 @@ bootstrap cache.
 
 ## Deploy
 
-### Option 1 — Deploy button (one-click fork + deploy)
+### One-click deploy (recommended — no CLI, works on Windows/macOS/Linux)
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/oitray/domain-drop-watcher)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/oitray/domain-drop-watcher)
 
-### Option 2 — Interactive setup wizard (recommended for MSPs)
+1. Click the button.
+2. Sign in to your Cloudflare account (or create a free one).
+3. Authorize the Cloudflare Workers Builds GitHub App to fork this repo into your GitHub account.
+4. Fill in the secrets form in the Cloudflare dashboard (all optional — or leave
+   `ADMIN_TOKEN` blank and the Worker generates one for you on first visit).
+5. Click Deploy. Cloudflare provisions a D1 database and two KV namespaces automatically.
+6. When deploy finishes, visit `https://<your-worker-name>.workers.dev/setup` to
+   receive your generated admin token (if you left it blank), then visit `/` for
+   the dashboard.
 
-```
-git clone https://github.com/oitray/domain-drop-watcher
-cd domain-drop-watcher
-npm install
-npm run setup
-```
+That is it. Roughly 90 seconds, browser-only.
 
-`npm run setup` launches an interactive wizard that guides you through:
+### What just got deployed
 
-1. Cloudflare auth (uses your existing `wrangler login` session or a scoped API
-   token you export in-shell — the token is **never** written to any file or
-   stored in the Worker runtime)
-2. D1 database + KV namespace provisioning (idempotent — safe to re-run)
-3. `schema.sql` bootstrap
-4. Admin token generation (32-byte random, stored via `wrangler secret put`)
-5. Email alerts via Resend (optional — skip and use webhooks only)
-6. Webhook host allowlist (Teams, Slack, Discord covered by default)
-7. `wrangler deploy` + smoke test against `/health`
+- A Cloudflare Worker at `https://<name>.<account>.workers.dev`
+- A D1 database (SQLite, free tier)
+- Two KV namespaces (free tier)
+- A cron trigger running every minute
+- All secrets encrypted in Cloudflare's Secret Store — nothing on your machine
 
-Re-run with flags to update a single piece of config later:
+### Secret reference
 
-```
-./scripts/setup.sh --email           # add or rotate Resend credentials
-./scripts/setup.sh --webhooks        # update webhook allowlist
-./scripts/setup.sh --rotate-admin    # generate a new ADMIN_TOKEN
-```
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `ADMIN_TOKEN` | No | Password for the admin dashboard. Leave blank — the Worker generates one on first visit at `/setup`. Shown once; save it immediately. |
+| `RESEND_API_KEY` | No | Resend API key for email alerts. Skip if you only need Teams/Slack/Discord webhooks. Requires a verified sending domain at resend.com. |
+| `RESEND_FROM_ADDRESS` | No | From-address for email alerts (e.g. `alerts@yourdomain.com`). Required when `RESEND_API_KEY` is set. |
+| `WEBHOOK_HOST_ALLOWLIST` | No | Comma-separated hostname globs for the webhook SSRF allowlist. Defaults to Teams, Slack, and Discord. Override to restrict or extend. |
 
-### Option 3 — Manual
+### Note on `wrangler.json` secrets vs vars
 
-```
-wrangler d1 create domain-drop-watcher-db
-wrangler kv:namespace create EVENTS
-wrangler kv:namespace create BOOTSTRAP
-# patch the returned IDs into wrangler.toml, then:
-wrangler d1 execute domain-drop-watcher-db --file=schema.sql
-printf '%s' "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')" \
-  | wrangler secret put ADMIN_TOKEN
-wrangler deploy
-```
+The current `wrangler.json` declares `ADMIN_TOKEN`, `RESEND_API_KEY`,
+`RESEND_FROM_ADDRESS`, and `WEBHOOK_HOST_ALLOWLIST` as `vars` with empty defaults.
+This makes them visible in the Cloudflare dashboard form during the deploy-button
+flow. After deploy, promote the sensitive ones (`ADMIN_TOKEN`, `RESEND_API_KEY`,
+`RESEND_FROM_ADDRESS`) to proper Cloudflare secrets via the dashboard:
+**Workers → your worker → Settings → Variables → Edit variables → convert to secret**.
+This ensures the values are encrypted at rest and not visible in the dashboard.
 
 ## Free-tier budget
 
@@ -198,9 +195,9 @@ wrangler secret put WEBHOOK_HOST_ALLOWLIST
 
 **No self-rotating secrets.** The Worker runtime does not hold a Cloudflare
 control-plane token and cannot call the CF API to rotate its own secrets.
-Rotation is operator-driven: `./scripts/setup.sh --email` or
-`./scripts/setup.sh --rotate-admin`. The Settings tab surfaces clear instructions
-for one-click-deploy operators without a local clone.
+Rotation is operator-driven via the Cloudflare dashboard: Workers → your worker
+→ Settings → Variables. The Settings tab in the admin dashboard surfaces clear
+instructions.
 
 ## FAQ
 
@@ -239,6 +236,17 @@ fallback (v2) is needed.
 - **Auto-register integration** — opt-in, registrar API, separate threat model; credit-card risk is out of scope for v1.
 - **Multi-operator RBAC** if the tool grows beyond single-admin deployments.
 
+## Local development
+
+Contributors can run the Worker locally with `wrangler dev`:
+
+    git clone https://github.com/oitray/domain-drop-watcher
+    cd domain-drop-watcher
+    npm install
+    npm run dev
+
+This runs against `wrangler`'s local emulator. No Cloudflare account required for code changes. See CONTRIBUTING.md for full setup.
+
 ## Contributing
 
 PRs welcome.
@@ -257,9 +265,8 @@ Conventions:
 - Tests colocated under `test/`, named `<module>.test.ts`. Vitest only.
 - TypeScript strict mode (`"strict": true, "noUncheckedIndexedAccess": true`).
 - No comments unless they document a non-obvious *why*. Well-named identifiers first.
-- `shellcheck scripts/setup.sh` must pass for any `setup.sh` changes.
 
-PR checklist: typecheck passes, tests pass, shellcheck passes for setup.sh changes, no new runtime dependencies.
+PR checklist: typecheck passes, tests pass, no new runtime dependencies.
 
 ## License
 

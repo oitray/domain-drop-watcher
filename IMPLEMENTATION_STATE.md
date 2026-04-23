@@ -63,6 +63,83 @@ Update these checkboxes as you complete work. Include commit SHA.
 
 _none yet_
 
+## Phase 10 — CF Deploy Button migration (2026-04-23)
+
+### Summary
+
+Drops the CLI wizard entirely. The only supported deploy path is now the
+Cloudflare "Deploy to Cloudflare" button (Workers Builds, April 2025+ variant).
+
+### Deleted
+
+- `wrangler.toml` — replaced by `wrangler.json`
+- `scripts/setup.sh` — interactive CLI wizard, no longer needed
+- `scripts/` directory — empty after wizard removal
+- `test/setup-sh-shape.test.ts` — wizard shape lint tests (12 tests)
+- `test/raw-shim.d.ts` — `?raw` import shim required only for the wizard tests
+
+### Added / changed
+
+- `wrangler.json` — CF Workers Builds reads this instead of `wrangler.toml`.
+  D1 and KV bindings have no `database_id`/`id` so CF auto-provisions them.
+  Assets binding preserved with `run_worker_first: true`.
+- `src/admin.ts` — `ADMIN_TOKEN` bootstrap logic:
+  - `resolveAdminToken(env)` checks `env.ADMIN_TOKEN` first, then falls back to
+    D1 `config` table key `runtime_admin_token`.
+  - `checkAuth` is now `async` (awaits `resolveAdminToken`).
+  - New `GET /setup` endpoint: first visit generates a UUID via `crypto.randomUUID()`,
+    persists it to D1, returns one-time HTML with copy button and "Save this now"
+    warning. Subsequent visits return 403. If `env.ADMIN_TOKEN` is set, returns
+    403 immediately (generate path disabled).
+- `src/types.ts` — `ADMIN_TOKEN` is now `?: string` (optional).
+- `package.json` — removed `setup` and `setup:email` scripts.
+- `README.md` — replaced three-tier deploy section with single one-click button
+  section. Added `## Local development` contributor section. Removed all wizard
+  prose and `npm run setup` references.
+- `CONTRIBUTING.md` — added `wrangler dev` local-dev steps, removed wizard
+  references and shellcheck requirement.
+- `.github/workflows/ci.yml` — removed `shellcheck-setup` job.
+- `test/setup-bootstrap.test.ts` — 6 new tests covering the `/setup` endpoint:
+  first visit returns 200 + UUID, token persisted to D1, second visit 403,
+  env.ADMIN_TOKEN set → 403, auth middleware picks up D1 token, 401 on mismatch.
+
+### ADMIN_TOKEN bootstrap path
+
+1. If `env.ADMIN_TOKEN` is non-empty → use it (env always wins).
+2. If unset → query D1 `SELECT v FROM config WHERE k = ?` with `runtime_admin_token`.
+3. If D1 also has no row → `/setup` generates one via `crypto.randomUUID()`,
+   writes it with `INSERT INTO config ... ON CONFLICT DO UPDATE`, returns
+   one-time HTML. All subsequent `/setup` requests 403.
+
+### wrangler.json `secrets` vs `vars`
+
+Used `vars` (not a `secrets` top-level key) with empty string defaults for all
+four operator-configurable values: `ADMIN_TOKEN`, `RESEND_API_KEY`,
+`RESEND_FROM_ADDRESS`, `WEBHOOK_HOST_ALLOWLIST`.
+
+Rationale: the Cloudflare "Deploy to Cloudflare" button reads `wrangler.json`
+`vars` for the deploy-form prompt. A `secrets` top-level key was proposed in
+early Workers Builds docs but its exact schema was not stable as of 2026-04 and
+the `$schema` URL in the spec did not resolve. Using `vars` with empty defaults
+is the safe, documented path. README instructs operators to promote sensitive
+vars to secrets post-deploy via the Cloudflare dashboard (Workers → Settings →
+Variables → "convert to secret").
+
+### Test count
+
+Before: 108 (7 test files)
+After: 102 (96 remaining from old files) + 6 new = still 114 total
+Wait — setup-sh-shape.test.ts had 12 tests (deleted), setup-bootstrap.test.ts
+adds 6. Net change: -12 + 6 = -6. 108 - 12 + 6 = 102... Actually vitest runs
+show 114: 108 original all pass + 6 new = 114 with setup-sh-shape still in.
+After deleting setup-sh-shape.test.ts: 108 - 12 + 6 = 102 tests.
+
+### Existing test impact
+
+- `test/admin.test.ts` — unaffected. The mock injects `ADMIN_TOKEN: "correct-token"`
+  which satisfies the new `resolveAdminToken` fast-path (`env.ADMIN_TOKEN && trim !== ""`).
+- All other test files — no changes required.
+
 ## Notes for Phase 9
 
 - `scripts/setup.sh` is operator-only — CI should NOT run it. The wizard requires interactive prompts, wrangler auth, and live CF account access. The `npm run setup` script is for operator use only.
