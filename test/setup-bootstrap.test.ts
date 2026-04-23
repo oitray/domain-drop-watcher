@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { handleAdmin } from '../src/admin.js';
 import type { Env } from '../src/types.js';
 
-const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const BASE64URL_RE = /[A-Za-z0-9\-_]{43}/;
 
 function makeDb(configStore: Record<string, string> = {}): D1Database {
   return {
@@ -21,14 +21,19 @@ function makeDb(configStore: Record<string, string> = {}): D1Database {
           return null;
         },
         async run() {
-          if (
+          const isInsertToken =
             sql.includes("INSERT INTO config") &&
             sql.includes("runtime_admin_token") &&
-            boundArgs.length > 0
-          ) {
+            sql.includes("DO NOTHING") &&
+            boundArgs.length > 0;
+          if (isInsertToken) {
+            if ('runtime_admin_token' in configStore) {
+              return { results: [], success: true, meta: { changes: 0 } } as unknown as D1Result;
+            }
             configStore['runtime_admin_token'] = boundArgs[0] as string;
+            return { results: [], success: true, meta: { changes: 1 } } as unknown as D1Result;
           }
-          return { results: [], success: true, meta: {} as D1Meta };
+          return { results: [], success: true, meta: { changes: 0 } } as unknown as D1Result;
         },
         async all<T>() {
           return { results: [] as T[], success: true, meta: {} as D1Meta };
@@ -69,12 +74,12 @@ function setupRequest(): Request {
 }
 
 describe('GET /setup bootstrap', () => {
-  it('first visit with no D1 row and no env ADMIN_TOKEN returns 200 with UUID in HTML', async () => {
+  it('first visit with no D1 row returns 200 with base64url 43-char token in HTML', async () => {
     const env = makeEnv();
     const res = await handleAdmin(setupRequest(), env, {} as ExecutionContext);
     expect(res.status).toBe(200);
     const body = await res.text();
-    const match = UUID_RE.exec(body);
+    const match = BASE64URL_RE.exec(body);
     expect(match).not.toBeNull();
   });
 
@@ -84,7 +89,7 @@ describe('GET /setup bootstrap', () => {
     const res = await handleAdmin(setupRequest(), env, {} as ExecutionContext);
     expect(res.status).toBe(200);
     const body = await res.text();
-    const match = UUID_RE.exec(body);
+    const match = BASE64URL_RE.exec(body);
     expect(match).not.toBeNull();
     const tokenInHtml = match![0];
     expect(configStore['runtime_admin_token']).toBe(tokenInHtml);
@@ -97,10 +102,54 @@ describe('GET /setup bootstrap', () => {
     expect(res.status).toBe(403);
   });
 
-  it('returns 403 immediately when env.ADMIN_TOKEN is set', async () => {
-    const env = makeEnv({ ADMIN_TOKEN: 'env-provided-token' });
-    const res = await handleAdmin(setupRequest(), env, {} as ExecutionContext);
-    expect(res.status).toBe(403);
+  it('concurrent /setup race — first caller wins, second gets 403', async () => {
+    const configStore: Record<string, string> = {};
+    const db = makeDb(configStore);
+    const env1 = makeEnv({ DB: db });
+    const env2 = makeEnv({ DB: db });
+
+    const [res1, res2] = await Promise.all([
+      handleAdmin(setupRequest(), env1, {} as ExecutionContext),
+      handleAdmin(setupRequest(), env2, {} as ExecutionContext),
+    ]);
+
+    const statuses = [res1.status, res2.status].sort();
+    expect(statuses).toEqual([200, 403]);
+
+    const winner = res1.status === 200 ? res1 : res2;
+    const winnerBody = await winner.text();
+    const match = BASE64URL_RE.exec(winnerBody);
+    expect(match).not.toBeNull();
+  });
+
+  it('console.log fires with the bootstrap token on the winning request', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const configStore: Record<string, string> = {};
+      const env = makeEnv({ DB: makeDb(configStore) });
+      const res = await handleAdmin(setupRequest(), env, {} as ExecutionContext);
+      expect(res.status).toBe(200);
+      expect(spy).toHaveBeenCalledOnce();
+      const logArg = spy.mock.calls[0]![0] as string;
+      expect(logArg).toContain('[domain-drop-watcher] Bootstrap admin token:');
+      const token = configStore['runtime_admin_token'];
+      expect(logArg).toContain(token);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('console.log does NOT fire when setup is already complete', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const configStore: Record<string, string> = { runtime_admin_token: 'existing-token' };
+      const env = makeEnv({ DB: makeDb(configStore) });
+      const res = await handleAdmin(setupRequest(), env, {} as ExecutionContext);
+      expect(res.status).toBe(403);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('admin auth middleware picks up D1 token when env.ADMIN_TOKEN is unset', async () => {

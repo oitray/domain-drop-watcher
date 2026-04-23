@@ -20,7 +20,6 @@
   },
   "vars": {
     "WEBHOOK_HOST_ALLOWLIST_DEFAULT": "*.webhook.office.com,hooks.slack.com,discord.com,discordapp.com",
-    "ADMIN_TOKEN": "",
     "RESEND_API_KEY": "",
     "RESEND_FROM_ADDRESS": "",
     "WEBHOOK_HOST_ALLOWLIST": ""

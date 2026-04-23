@@ -613,13 +613,30 @@ async function handleGetEvents(req: Request, env: Env): Promise<Response> {
 const SETUP_CSP =
   "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'";
 
-async function handleSetup(env: Env): Promise<Response> {
-  const existing = await env.DB
-    .prepare("SELECT v FROM config WHERE k = ?")
-    .bind("runtime_admin_token")
-    .first<{ v: string }>();
+function generateToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
 
-  if (existing?.v) {
+const SETUP_ALREADY_COMPLETE_MSG =
+  "Setup already complete. If you didn't see your token, an automated scanner may have raced you. " +
+  "Check your Cloudflare build/deploy logs for the bootstrap token (we logged it via console.log on first request). " +
+  "If the log is gone, run: " +
+  "wrangler d1 execute domain-drop-watcher --remote --command \"DELETE FROM config WHERE k='runtime_admin_token';\" " +
+  "to reset, then visit /setup again.";
+
+async function handleSetup(env: Env): Promise<Response> {
+  const token = generateToken();
+  const result = await env.DB
+    .prepare("INSERT INTO config (k, v) VALUES ('runtime_admin_token', ?) ON CONFLICT(k) DO NOTHING")
+    .bind(token)
+    .run();
+
+  if (result.meta.changes === 0) {
     const body = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <title>Setup — domain-drop-watcher</title>
 <style>
@@ -627,13 +644,12 @@ async function handleSetup(env: Env): Promise<Response> {
   h1{color:#e42e1b}
   code{background:#f4f4f4;padding:2px 6px;border-radius:3px;font-size:.9em}
   .box{background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:16px 20px;margin:24px 0}
+  pre{white-space:pre-wrap;word-break:break-all;font-size:.85em}
 </style></head><body>
-<h1>Token already set</h1>
+<h1>Setup already complete</h1>
 <div class="box">
-  <p>An admin token is already configured for this deployment. The setup page can only be used once.</p>
-  <p>Use your saved token to access the dashboard, or clear the token by running this SQL against your D1 database:</p>
-  <code>DELETE FROM config WHERE k = 'runtime_admin_token';</code>
-  <p>Then revisit <code>/setup</code> to generate a new one.</p>
+  <p>${SETUP_ALREADY_COMPLETE_MSG}</p>
+  <pre>wrangler d1 execute domain-drop-watcher --remote --command "DELETE FROM config WHERE k='runtime_admin_token';"</pre>
 </div>
 </body></html>`;
     return new Response(body, {
@@ -647,11 +663,7 @@ async function handleSetup(env: Env): Promise<Response> {
     });
   }
 
-  const token = crypto.randomUUID();
-  await env.DB
-    .prepare("INSERT INTO config (k, v) VALUES ('runtime_admin_token', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v")
-    .bind(token)
-    .run();
+  console.log("[domain-drop-watcher] Bootstrap admin token: " + token);
 
   const body = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <title>Setup — domain-drop-watcher</title>
