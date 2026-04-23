@@ -361,7 +361,10 @@ function makeKV(): KVNamespace {
 // Env factory
 // ---------------------------------------------------------------------------
 
-function makeEnv(dbSeed?: { [table in "domains" | "channels" | "domain_channels" | "config"]?: Row[] }): Env {
+function makeEnv(
+  dbSeed?: { [table in "domains" | "channels" | "domain_channels" | "config"]?: Row[] },
+  assets?: { fetch: (req: Request) => Promise<Response> },
+): Env {
   return {
     DB: makeD1(dbSeed),
     EVENTS: makeKV(),
@@ -369,6 +372,7 @@ function makeEnv(dbSeed?: { [table in "domains" | "channels" | "domain_channels"
     ADMIN_TOKEN: "correct-token",
     WEBHOOK_HOST_ALLOWLIST_DEFAULT: "*.webhook.office.com,hooks.slack.com,discord.com,discordapp.com",
     VERSION: "0.1.0-test",
+    ASSETS: assets,
   };
 }
 
@@ -748,12 +752,32 @@ describe("GET /events", () => {
 });
 
 describe("GET /", () => {
-  it("returns phase 7 placeholder text", async () => {
+  it("delegates to ASSETS binding and returns 200 text/html when ASSETS is present", async () => {
+    const mockAssets = {
+      fetch: async (_req: Request) =>
+        new Response("<html><body>dashboard</body></html>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+    };
+    const env = makeEnv(undefined, mockAssets);
+    const res = await handleAdmin(noAuthReq("/"), env, NOOP_CTX);
+    expect(res.status).toBe(200);
+    const ct = res.headers.get("content-type") ?? "";
+    expect(ct).toContain("text/html");
+    const body = await res.text();
+    expect(body).toContain("dashboard");
+    const csp = res.headers.get("Content-Security-Policy") ?? "";
+    expect(csp).toContain("default-src");
+    expect(csp).toContain("unsafe-inline");
+  });
+
+  it("returns 200 with fallback text when ASSETS binding is absent", async () => {
     const env = makeEnv();
     const res = await handleAdmin(noAuthReq("/"), env, NOOP_CTX);
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain("dashboard coming in phase 7");
+    expect(body).toContain("domain-drop-watcher");
   });
 });
 

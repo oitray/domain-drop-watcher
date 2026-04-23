@@ -41,7 +41,7 @@ Update these checkboxes as you complete work. Include commit SHA.
 - [x] Phase 4: Alert channels + webhook SSRF allowlist
 - [x] Phase 5: Admin HTTP routes + auth middleware
 - [x] Phase 6: Scheduled() cron handler
-- [ ] Phase 7: Admin dashboard (public/index.html)
+- [x] Phase 7: Admin dashboard (public/index.html)
 - [ ] Phase 8: Interactive setup wizard (scripts/setup.sh)
 - [ ] Phase 9: README + CI workflow
 
@@ -70,15 +70,24 @@ _none yet_
 - Phase 4 commit SHA: `064289f`
 - Phase 5 commit SHA: `c6e8d54`
 - Phase 6 commit SHA: `7594952`
+- Phase 7 commit SHA: (set after commit)
 
-## Notes for Phase 7+
+## Notes for Phase 7
+
+- `public/index.html` — vanilla JS SPA, ~40KB. No build step, no dependencies. All innerHTML writes use an `esc()` function that HTML-escapes all user-controlled data.
+- `ASSETS` binding added to `Env` in `types.ts` as optional `{ fetch: (req: Request) => Promise<Response> }`. Optional because tests don't inject it by default.
+- `wrangler.toml` — added `[assets]` block: `directory = "./public"`, `binding = "ASSETS"`, `run_worker_first = true`. The `run_worker_first = true` flag is critical — without it, Cloudflare serves static assets before the Worker sees the request, and the Worker never handles `/api/*`-style or root routes. Preserve this on any Bicep/wrangler changes.
+- `GET /` in `admin.ts` now delegates to `env.ASSETS.fetch(req)` and injects CSP/security headers over the response. Falls back to a plain text "deploy with wrangler assets configured" message when ASSETS is absent (e.g. in local tests).
+- CSP used: `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'`. The `unsafe-inline` is intentional — the dashboard embeds all JS and CSS in a single HTML file for zero-dependency deployment. A future hardening pass could add nonces, but it requires a build step to generate them per-request.
+- Test count: 96 (2 new tests in `GET /` describe block; 1 renamed/updated from the Phase 5 placeholder test).
+- Phase 8 (setup wizard): `scripts/setup.sh` is a standalone shell script; it uses `wrangler secret put` and D1 SQL for initialization. No Worker-side changes needed.
+
+## Notes for Phase 7+ (original)
 
 - `scheduled()` is fully implemented in `src/worker.ts`. It imports from `./db`, `./kv`, `./rdap`, `./alerts` — no new deps.
 - **Indeterminate-during-confirmation semantics:** When `lookupDomain` returns `indeterminate` (or throws), the update for that domain preserves the existing `pending_confirm_status` and `pending_confirm_count` unchanged. Transient RDAP outages do NOT reset or advance the confirmation streak. This is deliberate and tested in `test/scheduled.test.ts` ("indeterminate during confirmation" suite).
 - **LIMIT 45** is enforced by `getDueDomains(env.DB, now, 45)`. The D1 mock in `test/scheduled.test.ts` handles both literal (`LIMIT 45`) and parameterized (`LIMIT ?`) SQL so the 45-cap is verified in tests.
 - `recordCheckBatch` receives `pendingConfirmStatus`/`pendingConfirmCount` for every row including indeterminate ones — so the D1 batch always has complete data to write.
-- Phase 7 (dashboard): `public/index.html` will need `handleAdmin` to serve it from the `/` route (currently unhandled — returns 404). Add a `GET /` branch in `admin.ts` that returns the static HTML.
-- Phase 8 (setup wizard): `scripts/setup.sh` is a standalone shell script; it uses `wrangler secret put` and D1 SQL for initialization. No Worker-side changes needed.
 
 ## Notes for Phase 5+
 

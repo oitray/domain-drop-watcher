@@ -28,9 +28,12 @@ const JSON_HEADERS: HeadersInit = {
   "Cache-Control": "no-store",
 };
 
+const DASHBOARD_CSP =
+  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'";
+
 const SECURITY_HEADERS: HeadersInit = {
   "content-type": "text/plain",
-  "Content-Security-Policy": "default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'",
+  "Content-Security-Policy": DASHBOARD_CSP,
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
 };
@@ -612,9 +615,21 @@ export async function handleAdmin(
     return json({ ok: true, version: env.VERSION ?? "0.1.0" });
   }
 
-  if (pathname === "/" && method === "GET") {
+  if ((pathname === "/" || pathname === "/index.html") && method === "GET") {
+    if (env.ASSETS) {
+      const assetRes = await env.ASSETS.fetch(req);
+      const res = new Response(assetRes.body, {
+        status: assetRes.status,
+        headers: assetRes.headers,
+      });
+      res.headers.set("Content-Security-Policy", DASHBOARD_CSP);
+      res.headers.set("X-Content-Type-Options", "nosniff");
+      res.headers.set("Referrer-Policy", "no-referrer");
+      res.headers.set("Cache-Control", "no-store");
+      return res;
+    }
     return new Response(
-      "domain-drop-watcher — dashboard coming in phase 7",
+      "domain-drop-watcher admin — deploy with wrangler assets configured",
       { status: 200, headers: SECURITY_HEADERS },
     );
   }

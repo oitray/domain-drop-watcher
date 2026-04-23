@@ -8,6 +8,7 @@ export interface Env {
   WEBHOOK_HOST_ALLOWLIST?: string;
   WEBHOOK_HOST_ALLOWLIST_DEFAULT: string;
   VERSION?: string;
+  ASSETS?: { fetch: (req: Request) => Promise<Response> };
 }
 
 export interface DomainRow {
