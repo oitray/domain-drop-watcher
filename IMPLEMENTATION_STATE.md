@@ -64,4 +64,4 @@ _none yet_
 ## Notes for future phases
 
 - `tsconfig.json` includes `"skipLibCheck": true` — required because `@cloudflare/workers-types` and vitest's transitive `vite`/`tinybench` deps declare conflicting node types. This is standard for CF Workers + vitest setups. Does not affect runtime correctness.
-- Phase 1 commit SHA: see git log
+- Phase 1 commit SHA: `9963351`
