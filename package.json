@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "setup": "bash ./scripts/setup.sh",
+    "setup:email": "bash ./scripts/setup.sh --email",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

@@ -42,7 +42,7 @@ Update these checkboxes as you complete work. Include commit SHA.
 - [x] Phase 5: Admin HTTP routes + auth middleware
 - [x] Phase 6: Scheduled() cron handler
 - [x] Phase 7: Admin dashboard (public/index.html)
-- [ ] Phase 8: Interactive setup wizard (scripts/setup.sh)
+- [x] Phase 8: Interactive setup wizard (scripts/setup.sh)
 - [ ] Phase 9: README + CI workflow
 
 ## Conventions subagents must follow
@@ -61,6 +61,15 @@ Update these checkboxes as you complete work. Include commit SHA.
 
 _none yet_
 
+## Notes for Phase 9
+
+- `scripts/setup.sh` is operator-only — CI should NOT run it. The wizard requires interactive prompts, wrangler auth, and live CF account access. The `npm run setup` script is for operator use only.
+- New test file: `test/setup-sh-shape.test.ts` (12 lint-level assertions). Added `test/raw-shim.d.ts` for `?raw` import type support — required because tsconfig uses `@cloudflare/workers-types` only (no node types). The `?raw` import is a Vite/Vitest feature that returns file contents as a string at build time.
+- Test count: 108 (was 96 after Phase 7).
+- `package.json` gained two scripts: `setup` and `setup:email`.
+- `wrangler.toml` patching uses awk state machine (binding-keyed, not positional). Validates `[assets]` block + `run_worker_first` survive every patch. Atomic: writes to temp file, validates, then `mv` replaces.
+- No `eval` in the wizard (removed dynamic variable naming pattern for KV IDs — not needed since IDs go directly to wrangler.toml).
+
 ## Notes for future phases
 
 - `tsconfig.json` includes `"skipLibCheck": true` — required because `@cloudflare/workers-types` and vitest's transitive `vite`/`tinybench` deps declare conflicting node types. This is standard for CF Workers + vitest setups. Does not affect runtime correctness.
@@ -71,6 +80,7 @@ _none yet_
 - Phase 5 commit SHA: `c6e8d54`
 - Phase 6 commit SHA: `7594952`
 - Phase 7 commit SHA: `dc64713`
+- Phase 8 commit SHA: TBD
 
 ## Notes for Phase 7
 
