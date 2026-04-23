@@ -37,7 +37,7 @@ Update these checkboxes as you complete work. Include commit SHA.
 
 - [x] Phase 1: Repo skeleton + wrangler config
 - [x] Phase 2: D1 helpers + schema + budget module
-- [ ] Phase 3: RDAP client + status classifier
+- [x] Phase 3: RDAP client + status classifier
 - [ ] Phase 4: Alert channels + webhook SSRF allowlist
 - [ ] Phase 5: Admin HTTP routes + auth middleware
 - [ ] Phase 6: Scheduled() cron handler
@@ -66,6 +66,7 @@ _none yet_
 - `tsconfig.json` includes `"skipLibCheck": true` — required because `@cloudflare/workers-types` and vitest's transitive `vite`/`tinybench` deps declare conflicting node types. This is standard for CF Workers + vitest setups. Does not affect runtime correctness.
 - Phase 1 commit SHA: `9963351`
 - Phase 2 commit SHA: `45b9ae8`
+- Phase 3 commit SHA: TBD (updated after commit)
 
 ## Notes for Phase 3+
 
