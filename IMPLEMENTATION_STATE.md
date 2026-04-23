@@ -38,7 +38,7 @@ Update these checkboxes as you complete work. Include commit SHA.
 - [x] Phase 1: Repo skeleton + wrangler config
 - [x] Phase 2: D1 helpers + schema + budget module
 - [x] Phase 3: RDAP client + status classifier
-- [ ] Phase 4: Alert channels + webhook SSRF allowlist
+- [x] Phase 4: Alert channels + webhook SSRF allowlist
 - [ ] Phase 5: Admin HTTP routes + auth middleware
 - [ ] Phase 6: Scheduled() cron handler
 - [ ] Phase 7: Admin dashboard (public/index.html)
@@ -67,6 +67,13 @@ _none yet_
 - Phase 1 commit SHA: `9963351`
 - Phase 2 commit SHA: `45b9ae8`
 - Phase 3 commit SHA: `2ed1b54`
+- Phase 4 commit SHA: (set after commit)
+
+## Notes for Phase 5+
+
+- `dispatchAlert` calls `recordChannelDelivery` directly from `db.ts` after each channel attempt. Tests inject a no-op D1 stub via `Env.DB` — no refactor needed, pattern is clean.
+- `AlertTransition` does NOT have a `rdap` field in `types.ts` (Phase 3 kept it flat). `formatSlackBlocks` and `formatGenericWebhook` cast through `AlertTransition & { rdap?: ... }` to remain forward-compatible. Phase 6 or 3 can add the field to the type without breaking anything.
+- `WEBHOOK_HOST_ALLOWLIST_DEFAULT` must be set in `wrangler.toml` (non-secret) with OIT-safe defaults before Phase 5 admin routes go live.
 
 ## Notes for Phase 3+
 
