@@ -35,6 +35,8 @@ Token scopes verified: D1:Edit, Workers KV Storage:Edit, Workers Scripts:Edit, W
 
 Update these checkboxes as you complete work. Include commit SHA.
 
+**All phases complete** — ready for public announcement (2026-04-22).
+
 - [x] Phase 1: Repo skeleton + wrangler config
 - [x] Phase 2: D1 helpers + schema + budget module
 - [x] Phase 3: RDAP client + status classifier
@@ -43,7 +45,7 @@ Update these checkboxes as you complete work. Include commit SHA.
 - [x] Phase 6: Scheduled() cron handler
 - [x] Phase 7: Admin dashboard (public/index.html)
 - [x] Phase 8: Interactive setup wizard (scripts/setup.sh)
-- [ ] Phase 9: README + CI workflow
+- [x] Phase 9: README + CI workflow
 
 ## Conventions subagents must follow
 
