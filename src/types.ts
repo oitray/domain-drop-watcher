@@ -7,6 +7,7 @@ export interface Env {
   RESEND_FROM_ADDRESS?: string;
   WEBHOOK_HOST_ALLOWLIST?: string;
   WEBHOOK_HOST_ALLOWLIST_DEFAULT: string;
+  VERSION?: string;
 }
 
 export interface DomainRow {
@@ -55,6 +56,7 @@ export interface AlertTransition {
   oldStatus: RdapStatus | null;
   newStatus: RdapStatus;
   detectedAt: number;
+  rdap?: { source?: string };
 }
 
 export interface BudgetReport {
