@@ -69,7 +69,7 @@ _none yet_
 - Phase 3 commit SHA: `2ed1b54`
 - Phase 4 commit SHA: `064289f`
 - Phase 5 commit SHA: `c6e8d54`
-- Phase 6 commit SHA: TBD (updated after commit)
+- Phase 6 commit SHA: `7594952`
 
 ## Notes for Phase 7+
 
