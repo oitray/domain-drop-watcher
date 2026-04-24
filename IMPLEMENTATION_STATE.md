@@ -140,6 +140,51 @@ After deleting setup-sh-shape.test.ts: 108 - 12 + 6 = 102 tests.
   which satisfies the new `resolveAdminToken` fast-path (`env.ADMIN_TOKEN && trim !== ""`).
 - All other test files — no changes required.
 
+## Phase 11 — Option Z bootstrap (2026-04-23)
+
+### Summary
+
+Eliminates the `GET /setup` endpoint and all associated runtime bootstrap code. Admin token is now generated during Workers Builds CI via `scripts/bootstrap-admin-token.mjs` (npm `postdeploy` hook), stored as a Cloudflare Secret, and displayed once in the build log for the operator to copy. `resolveAdminToken` collapses to env-only — no D1 fallback.
+
+### Deleted files
+
+- `test/setup-bootstrap.test.ts` — 6 tests deleted (the `/setup` endpoint is gone)
+
+### Added files
+
+- `scripts/bootstrap-admin-token.mjs` — build-time token generator. Uses `execFileSync` (array args only) + stdin pipe for wrangler. Guards `main()` call with `import.meta.url` check so it does not auto-run when imported in tests.
+- `scripts/bootstrap-admin-token.mjs.d.ts` — TypeScript declarations for the `.mjs` module
+- `test/bootstrap-shim.d.ts` — `declare module` shim for tsc to resolve the `.mjs` import from tests
+- `test/bootstrap-script.test.ts` — 4 new tests covering: (1) skip put when secret exists, (2) put called with correct args + token format when absent, (3) token exactly 43 chars URL-safe base64, (4) "script not found" treated as absent, other errors re-thrown
+
+### Changed files
+
+- `src/admin.ts` — deleted `handleSetup`, `generateToken`, `SETUP_CSP`, `SETUP_ALREADY_COMPLETE_MSG`, the `/setup` route branch. `resolveAdminToken` is now synchronous, env-only.
+- `wrangler.json` — removed `ADMIN_TOKEN`, `RESEND_API_KEY`, `RESEND_FROM_ADDRESS`, `WEBHOOK_HOST_ALLOWLIST` from `vars`. Only `WEBHOOK_HOST_ALLOWLIST_DEFAULT` remains.
+- `.dev.vars.example` — `ADMIN_TOKEN` removed. Only `RESEND_API_KEY`, `RESEND_FROM_ADDRESS`, `WEBHOOK_HOST_ALLOWLIST` with single-line `#` comments.
+- `package.json` — added `"postdeploy": "node scripts/bootstrap-admin-token.mjs"`.
+- `tsconfig.json` — added `"allowJs": true` (enables tsc to resolve `.mjs` imports) and `scripts/**/*` to `include`.
+- `README.md` — replaced `/setup` deploy flow with 7-step Option Z flow; rewrote Recovery section.
+- `SECURITY.md` — added Admin token threat model section and CT-log enumerability note.
+- `test/admin.test.ts` — added 3 `resolveAdminToken` null-return tests (undefined, empty string, whitespace).
+
+### `scripts/bootstrap-admin-token.mjs` behavior summary
+
+- `checkSecretExists(workerName, secretName, execFileSyncFn)`: calls `wrangler secret list --name <worker> --format json`. Returns `true` if output JSON array includes `{name: 'ADMIN_TOKEN'}`. Returns `false` if wrangler errors with "script not found" / "does not exist" / "10007" (first-deploy path). Re-throws all other errors.
+- `main(deps?)`: accepts optional `{execFileSync, randomBytes}` dep-injection for tests. If secret exists, prints skip message and returns. Otherwise generates `randomBytes(32).toString('base64url')` (43 chars), pipes to `wrangler secret put ADMIN_TOKEN --name domain-drop-watcher` via stdin, prints banner with token.
+- Top-level module: only calls `main()` when `process.argv[1]` matches `import.meta.url` (i.e., run directly, not imported).
+
+### Test count
+
+Before: 102 (6 test files after setup-sh-shape deletion in Phase 10)
+After: 103 (102 - 6 setup-bootstrap tests + 4 bootstrap-script tests + 3 resolveAdminToken null tests = 103)
+
+Wait — Phase 10 ended at 102. Subtracting setup-bootstrap (6) and adding bootstrap-script (4) + resolveAdminToken null (3) = 102 - 6 + 4 + 3 = 103. Confirmed by `vitest run` output: 103 tests, 7 files.
+
+### Commit SHA
+
+Appended after commit.
+
 ## Notes for Phase 9
 
 - `scripts/setup.sh` is operator-only — CI should NOT run it. The wizard requires interactive prompts, wrangler auth, and live CF account access. The `npm run setup` script is for operator use only.

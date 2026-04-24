@@ -393,6 +393,47 @@ const NOOP_CTX = {} as ExecutionContext;
 // Tests
 // ---------------------------------------------------------------------------
 
+describe("resolveAdminToken — null cases", () => {
+  it("returns 401 (token resolves to null) when ADMIN_TOKEN is undefined", async () => {
+    const env = makeEnv();
+    env.ADMIN_TOKEN = undefined;
+    const res = await handleAdmin(
+      new Request("https://example.workers.dev/domains", {
+        headers: { Authorization: "Bearer anything" },
+      }),
+      env,
+      NOOP_CTX,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 (token resolves to null) when ADMIN_TOKEN is empty string", async () => {
+    const env = makeEnv();
+    env.ADMIN_TOKEN = "";
+    const res = await handleAdmin(
+      new Request("https://example.workers.dev/domains", {
+        headers: { Authorization: "Bearer anything" },
+      }),
+      env,
+      NOOP_CTX,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 (token resolves to null) when ADMIN_TOKEN is only whitespace", async () => {
+    const env = makeEnv();
+    env.ADMIN_TOKEN = "   ";
+    const res = await handleAdmin(
+      new Request("https://example.workers.dev/domains", {
+        headers: { Authorization: "Bearer    " },
+      }),
+      env,
+      NOOP_CTX,
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("/health — unauthenticated", () => {
   it("returns 200 + {ok:true} without auth", async () => {
     const env = makeEnv();
