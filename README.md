@@ -6,6 +6,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Runs on Cloudflare Workers (free tier)](https://img.shields.io/badge/Runs%20on-Cloudflare%20Workers%20free%20tier-orange?logo=cloudflare)](https://developers.cloudflare.com/workers/)
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/oitray/domain-drop-watcher)
+
+One click. No CLI. Works on Windows, macOS, and Linux. Full setup details below.
+
 ## Features
 
 - **Detects drops before attackers do.** Polls RDAP on the authoritative registry for each TLD, catches `pendingDelete` / `redemptionPeriod` / `pendingRestore` transitions the moment they appear, and flags domains that become available.
@@ -95,8 +99,6 @@ Workers KV is used only for a non-critical event ring buffer and the IANA
 bootstrap cache.
 
 ## Deploy
-
-### One-click deploy (recommended — no CLI, works on Windows/macOS/Linux)
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/oitray/domain-drop-watcher)
 
