@@ -6,6 +6,32 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Runs on Cloudflare Workers (free tier)](https://img.shields.io/badge/Runs%20on-Cloudflare%20Workers%20free%20tier-orange?logo=cloudflare)](https://developers.cloudflare.com/workers/)
 
+## Features
+
+- **Detects drops before attackers do.** Polls RDAP on the authoritative registry for each TLD, catches `pendingDelete` / `redemptionPeriod` / `pendingRestore` transitions the moment they appear, and flags domains that become available.
+- **Fires alerts everywhere you operate.** Email (via Cloudflare Email Routing — no external service), Microsoft Teams, Slack, Discord, and generic JSON webhooks. Mix and match channels per domain.
+- **One-click deploy, zero config.** Browser-only install on Windows / macOS / Linux. No CLI, no DNS, no API keys unless you want them. Admin token auto-generated and printed once in the build log.
+- **Scales to hundreds of domains on the free tier.** 225 domains at 5-min cadence, 675 at 15-min, 2,700 at 60-min — all inside Cloudflare's free limits. See the scale table below.
+- **Browser-based admin dashboard.** Add/remove domains, configure channels, preview budget impact, watch event history — all from a vanilla-JS SPA served by the Worker itself.
+- **False-alert-resistant.** Two-run confirmation gate means transient RDAP outages can't trigger a false drop alert. Per-domain alert dedupe prevents duplicate pages.
+- **SSRF-hardened webhooks.** Canonicalized host-glob allowlist (Teams / Slack / Discord out of the box), literal IPs and non-HTTPS rejected unconditionally. Operator-extendable.
+- **Per-domain cadence.** Watch high-risk domains every minute, others every hour. Scheduler is budget-aware and auto-assigns least-loaded phase offsets so you never blow the free-tier subrequest ceiling.
+- **Bulk add with preview.** Paste a list of domains, see the accepted/rejected split + budget-before/after, commit when you're happy.
+- **Dogfood MIT-licensed FOSS.** No per-domain fees, no SaaS dependency, no watch-list data leaving your Cloudflare account.
+
+## Scale on the free tier
+
+Daily check volume is constant (one cron per minute × up to 45 domains = ~64,800 checks/day regardless of watchlist size). Per-domain cadence controls *which* domains are checked each minute, not how many — so a longer cadence lets you watch more domains.
+
+| Cadence | Max domains (free tier) | Use case |
+|---------|-------------------------|----------|
+| 1 min   | 45                      | Actively-attacked domains you expect to drop today |
+| 5 min   | 225                     | Typical high-priority client watchlist |
+| 15 min  | 675                     | Standard MSP client portfolio |
+| 60 min  | 2,700                   | Broad defensive watchlist (monitoring-only) |
+
+Mix cadences freely — the scheduler handles the math. The live `/budget` endpoint shows exact headroom for your deployment.
+
 ## 100% free on Cloudflare
 
 Every piece of this runs inside Cloudflare's free tier, with no credit card required:
