@@ -99,6 +99,27 @@ That is it. Roughly 90 seconds, browser-only.
 
 `ADMIN_TOKEN` is not a deploy-form field. The build script generates it automatically and stores it as a Cloudflare Secret. You do not set it at deploy time.
 
+### Email alerts via Resend (optional)
+
+Domain Drop Watcher sends email alerts through [Resend](https://resend.com) (free tier: 3,000 emails/month, 100/day — sufficient for typical MSP watchlists). Setup takes ~10 minutes, mostly waiting for DNS propagation.
+
+**1. Sign up and add a sending domain.** Create a free account at https://resend.com. Navigate to **Domains → Add Domain** and enter the domain you'll send alerts from (e.g. `alerts.yourmsp.com`). You must own the domain — you'll be adding DNS records to it.
+
+**2. Add the DNS records Resend provides.** Resend shows two records to add at your DNS provider (GoDaddy, Cloudflare, Route 53, Namecheap — wherever your domain's nameservers point):
+
+- **SPF** — a `TXT` record on the root (e.g. `alerts.yourmsp.com`). Resend provides the exact value, something like `v=spf1 include:amazonses.com ~all`.
+- **DKIM** — a `TXT` record on a Resend-specified subdomain (e.g. `resend._domainkey.alerts.yourmsp.com`). Value is a long public key string.
+
+Copy the exact values from the Resend dashboard. Propagation typically takes 5–10 minutes. Resend's dashboard shows "Verified" once it's live.
+
+**3. Create an API key.** Resend dashboard → **API Keys → Create API Key**. Copy the key — it starts with `re_`.
+
+**4. Fill in the deploy form.** When you click the Deploy-to-Cloudflare button, the form will prompt for `RESEND_API_KEY` (paste the `re_...` key) and `RESEND_FROM_ADDRESS` (e.g. `alerts@alerts.yourmsp.com` — must be on the verified domain). Both render as Secret fields, encrypted at rest.
+
+Already deployed? Add the Secrets after the fact in the Cloudflare dashboard: Workers & Pages → `domain-drop-watcher` → Settings → Variables and Secrets → **Add**, type `Secret`. Save then redeploy for the new values to take effect.
+
+> **Why not use Cloudflare's own email?** Cloudflare's `send_email` Worker binding requires every recipient address to be pre-verified on your Email Routing account — not a fit for MSP use where alerts go to arbitrary client addresses. MailChannels' free Workers relay ended in 2024. Resend is the current standard for transactional email from CF Workers. See [Cloudflare Email Routing docs](https://developers.cloudflare.com/email-routing/email-workers/send-email-workers/) for the verified-recipient constraint.
+
 ## Recovery
 
 - **Lost admin token** — **Delete the `ADMIN_TOKEN` Secret AND redeploy in a single session.** Deleting without redeploying locks you out until the next deploy regenerates a new token.
