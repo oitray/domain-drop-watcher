@@ -10,6 +10,18 @@
 
 One click. No CLI. Works on Windows, macOS, and Linux. Full setup details below.
 
+## About
+
+Domain Drop Watcher is a FOSS, self-hosted tool that watches a list of domains and alerts you the instant any of them enters `pendingDelete`, `redemptionPeriod`, or becomes available for re-registration. It runs as a single Cloudflare Worker on the free tier — no servers, no SaaS, no per-domain fees.
+
+### Why this exists
+
+A peer's client was being repeatedly typosquatted by the same attacker. The registrar would take the malicious domain down on an abuse complaint — then release it back into the pool rather than transferring ownership. The attacker grabbed it again within minutes, sometimes at a different registrar. Rinse, repeat.
+
+Commercial drop-catchers (DropCatch, SnapNames, Park.io, Dynadot Backorder) charge per domain and target *domainers* — people trying to snipe expiring inventory for resale — not defenders trying to protect a client's brand. They're also SaaS you'd be handing your watch-list to. No FOSS, self-hostable, defender-oriented option existed.
+
+This tool fills that gap. Deploy it on your own Cloudflare account in 90 seconds, watch as many domains as you need, get alerts wherever you already operate (email / Teams / Slack / Discord / any webhook). No third party sees your watchlist.
+
 ## Features
 
 - **Detects drops before attackers do.** Polls RDAP on the authoritative registry for each TLD, catches `pendingDelete` / `redemptionPeriod` / `pendingRestore` transitions the moment they appear, and flags domains that become available.
@@ -51,20 +63,6 @@ Every piece of this runs inside Cloudflare's free tier, with no credit card requ
 | Static Assets | Admin dashboard hosting | Included with Worker, free and unlimited |
 
 No external services, no API keys, no monthly bills. For typical MSP watchlists (tens to hundreds of domains), this workload sits comfortably inside these limits.
-
-## Why this exists
-
-A peer's client was repeatedly typosquatted by the same attacker. The registrar
-would take the domain down on an abuse complaint — then release it back into the
-pool. The attacker grabbed it again within minutes, sometimes at a different
-registrar.
-
-Commercial drop-catchers (DropCatch, SnapNames, Park.io, Dynadot Backorder)
-charge per domain and target domainers, not defenders. No FOSS, self-hostable
-option existed for an MSP to run on a client's behalf — for free, without
-per-domain fees, and without handing watch-list data to a third party.
-
-This tool fills that gap. It runs entirely inside Cloudflare's free tier.
 
 ## How it works
 
