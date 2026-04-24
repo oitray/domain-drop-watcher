@@ -115,24 +115,34 @@ export function formatGenericWebhook(domain: DomainRow, transition: AlertTransit
   };
 }
 
-export function formatResendEmail(
+export function formatNativeEmail(
   domain: DomainRow,
   transition: AlertTransition,
   fromAddress: string,
   to: string,
-): unknown {
-  const subject = `[domain-drop-watcher] ${domain.fqdn} → ${transition.newStatus}`;
+): string {
+  const subject = `[domain-drop-watcher] ${domain.fqdn} -> ${transition.newStatus}`;
   const detectedStr = new Date(transition.detectedAt).toISOString();
-  const html = `<table style="font-family:sans-serif;border-collapse:collapse;width:100%;max-width:480px">
-  <tr><th colspan="2" style="background:#e42e1b;color:#fff;padding:10px;text-align:left">${subject}</th></tr>
-  <tr><td style="padding:6px;border:1px solid #ddd">Domain</td><td style="padding:6px;border:1px solid #ddd">${domain.fqdn}</td></tr>
-  <tr><td style="padding:6px;border:1px solid #ddd">Label</td><td style="padding:6px;border:1px solid #ddd">${domain.label ?? "(none)"}</td></tr>
-  <tr><td style="padding:6px;border:1px solid #ddd">Old status</td><td style="padding:6px;border:1px solid #ddd">${transition.oldStatus ?? "(none)"}</td></tr>
-  <tr><td style="padding:6px;border:1px solid #ddd">New status</td><td style="padding:6px;border:1px solid #ddd">${transition.newStatus}</td></tr>
-  <tr><td style="padding:6px;border:1px solid #ddd">Detected at</td><td style="padding:6px;border:1px solid #ddd">${detectedStr}</td></tr>
-</table>`;
-  const text = `[domain-drop-watcher] ${domain.fqdn} → ${transition.newStatus}\n\nDomain: ${domain.fqdn}\nLabel: ${domain.label ?? "(none)"}\nOld status: ${transition.oldStatus ?? "(none)"}\nNew status: ${transition.newStatus}\nDetected at: ${detectedStr}`;
-  return { from: fromAddress, to, subject, html, text };
+  const body = [
+    `Domain: ${domain.fqdn}`,
+    `Label: ${domain.label ?? "(none)"}`,
+    `Old status: ${transition.oldStatus ?? "(none)"}`,
+    `New status: ${transition.newStatus}`,
+    `Detected at: ${detectedStr}`,
+  ].join("\r\n");
+  const msgId = `<${Date.now()}.${Math.random().toString(36).slice(2)}@domain-drop-watcher>`;
+  return [
+    `From: ${fromAddress}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: ${msgId}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/plain; charset=UTF-8`,
+    `Content-Transfer-Encoding: 7bit`,
+    ``,
+    body,
+  ].join("\r\n");
 }
 
 function buildWebhookBody(
@@ -164,23 +174,15 @@ export async function dispatchAlert(
       let result: DispatchResult;
 
       if (channel.type === "email") {
-        const apiKey = ctx.env.RESEND_API_KEY;
-        const fromAddress = ctx.env.RESEND_FROM_ADDRESS;
-        if (!apiKey || !fromAddress) {
-          result = { channelId: channel.id, ok: false, error: "resend-not-configured" };
+        const emailBinding = ctx.env.EMAIL;
+        const fromAddress = ctx.env.ALERT_FROM_ADDRESS;
+        if (!emailBinding || !fromAddress) {
+          result = { channelId: channel.id, ok: false, error: "email-not-configured" };
         } else {
-          const body = formatResendEmail(domain, transition, fromAddress, channel.target);
+          const mime = formatNativeEmail(domain, transition, fromAddress, channel.target);
           try {
-            const resp = await fetchImpl("https://api.resend.com/emails", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${apiKey}`,
-              },
-              body: JSON.stringify(body),
-            });
-            result = { channelId: channel.id, ok: resp.ok, statusCode: resp.status };
-            if (!resp.ok) result.error = `resend-http-${resp.status}`;
+            await emailBinding.send(new Response(mime));
+            result = { channelId: channel.id, ok: true };
           } catch (e) {
             result = { channelId: channel.id, ok: false, error: String(e) };
           }

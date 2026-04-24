@@ -255,6 +255,10 @@
             <input type="text" id="ch-label" placeholder="My channel">
           </div>
         </div>
+        <div class="notice notice-info" style="margin-top:10px; font-size:12px">
+          <b>Email channels:</b> Destination must be verified in Cloudflare Email Routing on your account.
+          Set <code>ALERT_FROM_ADDRESS</code> to a sender address @ your Email-Routing-enabled domain.
+        </div>
         <div id="add-channel-error" class="notice notice-error" style="display:none; margin-top:10px"></div>
         <div style="margin-top:12px; display:flex; gap:8px;">
           <button class="btn btn-primary btn-sm" id="save-channel-btn">Save</button>
@@ -320,9 +324,10 @@
       <div class="card-header">&#9888;&#65039; Email Configuration Issue</div>
       <div class="card-body">
         <div class="notice notice-warn">
-          Email alerts configured but delivery errors detected. If alerts are not sending, re-run
-          <code>./scripts/setup.sh --email</code> or go to Cloudflare dashboard &rarr; Workers &rarr;
-          this worker &rarr; Settings &rarr; Variables &rarr; set <code>RESEND_API_KEY</code>.
+          Email alerts configured but delivery errors detected. Email alerts use Cloudflare Email Routing.
+          Enable Email Routing on a domain in your Cloudflare account, verify your destination addresses,
+          and set <code>ALERT_FROM_ADDRESS</code> in Cloudflare dashboard &rarr; Workers &rarr;
+          this worker &rarr; Settings &rarr; Variables.
         </div>
       </div>
     </div>

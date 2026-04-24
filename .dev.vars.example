@@ -1,6 +1,4 @@
-# Resend API key for email alerts (optional — skip for Teams/Slack/Discord only)
-RESEND_API_KEY=
-# From-address for email alerts, e.g. alerts@yourdomain.com (required when RESEND_API_KEY is set)
-RESEND_FROM_ADDRESS=
+# Sender address for email alerts. Must be @ a domain you've enabled Cloudflare Email Routing on. Leave blank if not using email alerts.
+ALERT_FROM_ADDRESS=
 # Comma-separated hostname globs for the webhook SSRF allowlist (optional — defaults to Teams/Slack/Discord)
 WEBHOOK_HOST_ALLOWLIST=

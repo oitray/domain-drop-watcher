@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   detectWebhookType,
   formatTeamsCard,
-  formatResendEmail,
+  formatNativeEmail,
   formatSlackBlocks,
   formatDiscordEmbed,
   dispatchAlert,
@@ -153,26 +153,26 @@ describe("formatDiscordEmbed", () => {
   });
 });
 
-describe("formatResendEmail", () => {
-  it("includes fqdn in subject", () => {
-    const result = formatResendEmail(makeDomain({ fqdn: "drop.me" }), makeTransition(), "alerts@oit.co", "user@test.com") as { subject: string };
-    expect(result.subject).toContain("drop.me");
+describe("formatNativeEmail", () => {
+  it("includes fqdn in subject line", () => {
+    const mime = formatNativeEmail(makeDomain({ fqdn: "drop.me" }), makeTransition(), "alerts@oit.co", "user@test.com");
+    expect(mime).toContain("drop.me");
   });
 
-  it("includes fqdn in html", () => {
-    const result = formatResendEmail(makeDomain({ fqdn: "drop.me" }), makeTransition(), "alerts@oit.co", "user@test.com") as { html: string };
-    expect(result.html).toContain("drop.me");
+  it("includes newStatus in subject line", () => {
+    const mime = formatNativeEmail(makeDomain(), makeTransition({ newStatus: "dropping" }), "alerts@oit.co", "user@test.com");
+    expect(mime).toContain("dropping");
   });
 
-  it("includes newStatus in subject", () => {
-    const result = formatResendEmail(makeDomain(), makeTransition({ newStatus: "dropping" }), "alerts@oit.co", "user@test.com") as { subject: string };
-    expect(result.subject).toContain("dropping");
+  it("sets From and To headers correctly", () => {
+    const mime = formatNativeEmail(makeDomain(), makeTransition(), "from@oit.co", "to@test.com");
+    expect(mime).toContain("From: from@oit.co");
+    expect(mime).toContain("To: to@test.com");
   });
 
-  it("sets from and to correctly", () => {
-    const result = formatResendEmail(makeDomain(), makeTransition(), "from@oit.co", "to@test.com") as { from: string; to: string };
-    expect(result.from).toBe("from@oit.co");
-    expect(result.to).toBe("to@test.com");
+  it("includes MIME-Version header", () => {
+    const mime = formatNativeEmail(makeDomain(), makeTransition(), "from@oit.co", "to@test.com");
+    expect(mime).toContain("MIME-Version: 1.0");
   });
 });
 
@@ -209,33 +209,50 @@ describe("dispatchAlert — allowlist rejection", () => {
   });
 });
 
-describe("dispatchAlert — email, no RESEND_API_KEY", () => {
-  it("returns {ok:false, error:'resend-not-configured'} when key missing", async () => {
+describe("dispatchAlert — email, no EMAIL binding", () => {
+  it("returns {ok:false, error:'email-not-configured'} when binding is absent", async () => {
     const channel = makeChannel({ type: "email", target: "user@test.com" });
     const fetchMock = vi.fn(makeFetch(200));
     const results = await dispatchAlert(makeDomain(), makeTransition(), [channel], {
-      env: makeEnv({ RESEND_API_KEY: undefined, RESEND_FROM_ADDRESS: "alerts@oit.co" }),
+      env: makeEnv({ EMAIL: undefined, ALERT_FROM_ADDRESS: "alerts@oit.co" }),
       fetchImpl: fetchMock as unknown as typeof fetch,
     });
     expect(results[0]?.ok).toBe(false);
-    expect(results[0]?.error).toBe("resend-not-configured");
+    expect(results[0]?.error).toBe("email-not-configured");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns {ok:false, error:'email-not-configured'} when ALERT_FROM_ADDRESS is missing", async () => {
+    const emailSend = vi.fn(() => Promise.resolve());
+    const channel = makeChannel({ type: "email", target: "user@test.com" });
+    const fetchMock = vi.fn(makeFetch(200));
+    const results = await dispatchAlert(makeDomain(), makeTransition(), [channel], {
+      env: makeEnv({ EMAIL: { send: emailSend }, ALERT_FROM_ADDRESS: undefined }),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    expect(results[0]?.ok).toBe(false);
+    expect(results[0]?.error).toBe("email-not-configured");
+    expect(emailSend).not.toHaveBeenCalled();
   });
 });
 
 describe("dispatchAlert — email, fully configured", () => {
-  it("returns {ok:true} and calls Resend endpoint with correct auth header", async () => {
+  it("returns {ok:true} and calls env.EMAIL.send() once with MIME message", async () => {
+    const emailSend = vi.fn(() => Promise.resolve());
     const channel = makeChannel({ type: "email", target: "user@test.com" });
     const fetchMock = vi.fn(makeFetch(200));
     const results = await dispatchAlert(makeDomain(), makeTransition(), [channel], {
-      env: makeEnv({ RESEND_API_KEY: "re_testkey", RESEND_FROM_ADDRESS: "alerts@oit.co" }),
+      env: makeEnv({ EMAIL: { send: emailSend }, ALERT_FROM_ADDRESS: "alerts@oit.co" }),
       fetchImpl: fetchMock as unknown as typeof fetch,
     });
     expect(results[0]?.ok).toBe(true);
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://api.resend.com/emails");
-    expect((init.headers as Record<string, string>)?.["Authorization"]).toBe("Bearer re_testkey");
+    expect(emailSend).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
+    const [arg] = emailSend.mock.calls[0] as unknown as [unknown];
+    const mime = arg instanceof Response ? await arg.text() : String(arg);
+    expect(mime).toContain("From: alerts@oit.co");
+    expect(mime).toContain("To: user@test.com");
+    expect(mime).toContain("MIME-Version: 1.0");
   });
 });
 

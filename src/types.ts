@@ -3,8 +3,8 @@ export interface Env {
   EVENTS: KVNamespace;
   BOOTSTRAP: KVNamespace;
   ADMIN_TOKEN?: string;
-  RESEND_API_KEY?: string;
-  RESEND_FROM_ADDRESS?: string;
+  EMAIL?: { send: (message: unknown) => Promise<void> };
+  ALERT_FROM_ADDRESS?: string;
   WEBHOOK_HOST_ALLOWLIST?: string;
   WEBHOOK_HOST_ALLOWLIST_DEFAULT: string;
   VERSION?: string;

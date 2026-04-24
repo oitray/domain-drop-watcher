@@ -6,6 +6,22 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Runs on Cloudflare Workers (free tier)](https://img.shields.io/badge/Runs%20on-Cloudflare%20Workers%20free%20tier-orange?logo=cloudflare)](https://developers.cloudflare.com/workers/)
 
+## 100% free on Cloudflare
+
+Every piece of this runs inside Cloudflare's free tier, with no credit card required:
+
+| Service | Used for | Free-tier limit |
+|---------|----------|-----------------|
+| Workers | Request + cron handlers | 100,000 requests/day |
+| Cron Triggers | Per-minute scheduler | 5 triggers/account (we use 1) |
+| D1 | Domain state + schedule | 5 GB, 5M reads/day, 100k writes/day |
+| Workers KV | Event log + IANA cache | 1 GB, 100k reads/day, 1k writes/day |
+| Workers Builds | CI for deploys | 500 builds/month |
+| Email Routing `send_email` | Alert delivery | No published send quota; destination addresses must be verified in your CF account |
+| Static Assets | Admin dashboard hosting | Included with Worker, free and unlimited |
+
+No external services, no API keys, no monthly bills. For typical MSP watchlists (tens to hundreds of domains), this workload sits comfortably inside these limits.
+
 ## Why this exists
 
 A peer's client was repeatedly typosquatted by the same attacker. The registrar
@@ -33,7 +49,7 @@ This tool fills that gap. It runs entirely inside Cloudflare's free tier.
         v                                                   v
 +--------------------+     on status change       +-------------------+
 |  Admin HTTP routes |--------------------------->|  Alert channels   |
-|  Bearer-auth       |     dedupe + fan out       |  - Resend (email) |
+|  Bearer-auth       |     dedupe + fan out       |  - Email Routing  |
 |  GET/POST/DELETE   |                            |  - Teams webhook  |
 |  /domains, /chans  |                            |  - Slack webhook  |
 +--------------------+                            |  - Discord webhook|
@@ -61,7 +77,7 @@ bootstrap cache.
 1. Click the button.
 2. Sign in to your Cloudflare account (or create a free one).
 3. Authorize the Cloudflare Workers Builds GitHub App to fork this repo into your GitHub account. See **What you're authorizing** below.
-4. Optionally fill in `RESEND_API_KEY` and `RESEND_FROM_ADDRESS` as Secrets in the deploy form if you want email alerts. Leave them blank for Teams/Slack/Discord webhooks only. No other fields are required.
+4. Optionally fill in `ALERT_FROM_ADDRESS` as a Secret in the deploy form if you want email alerts (must be @ a domain with Cloudflare Email Routing enabled). Leave blank for Teams/Slack/Discord webhooks only. No other fields are required.
 5. Click Deploy. Cloudflare provisions a D1 database and two KV namespaces automatically.
 6. Watch the build log stream in the Cloudflare dashboard. Near the end, the build script prints a banner containing your auto-generated admin token. Copy it.
 7. Visit your Worker URL. Log in with that token.
@@ -93,32 +109,26 @@ That is it. Roughly 90 seconds, browser-only.
 
 | Variable | Required | Notes |
 |----------|----------|-------|
-| `RESEND_API_KEY` | No | Resend API key for email alerts. Skip if you only need Teams/Slack/Discord webhooks. Requires a verified sending domain at resend.com. Declare as a Secret in the deploy form. |
-| `RESEND_FROM_ADDRESS` | No | From-address for email alerts (e.g. `alerts@yourdomain.com`). Required when `RESEND_API_KEY` is set. Declare as a Secret in the deploy form. |
+| `ALERT_FROM_ADDRESS` | No | Sender address for email alerts (e.g. `dropwatch@yourmsp.com`). Must be @ a domain you have enabled Cloudflare Email Routing on. Leave blank if you only need Teams/Slack/Discord webhooks. |
 | `WEBHOOK_HOST_ALLOWLIST` | No | Comma-separated hostname globs for the webhook SSRF allowlist. Defaults to Teams, Slack, and Discord. Override to restrict or extend. |
 
 `ADMIN_TOKEN` is not a deploy-form field. The build script generates it automatically and stores it as a Cloudflare Secret. You do not set it at deploy time.
 
-### Email alerts via Resend (optional)
+### Email alerts via Cloudflare Email Routing (optional)
 
-Domain Drop Watcher sends email alerts through [Resend](https://resend.com) (free tier: 3,000 emails/month, 100/day — sufficient for typical MSP watchlists). Setup takes ~10 minutes, mostly waiting for DNS propagation.
+Email alerts use Cloudflare's native `send_email` binding — no external service, no API key, no DNS required beyond enabling Email Routing on a domain you already control.
 
-**1. Sign up and add a sending domain.** Create a free account at https://resend.com. Navigate to **Domains → Add Domain** and enter the domain you'll send alerts from (e.g. `alerts.yourmsp.com`). You must own the domain — you'll be adding DNS records to it.
+**1. Enable Email Routing on a domain in your Cloudflare account.** Dashboard → Email → Email Routing → pick a domain → **Enable Email Routing**. CF auto-configures MX records if the domain is on Cloudflare nameservers. One-click.
 
-**2. Add the DNS records Resend provides.** Resend shows two records to add at your DNS provider (GoDaddy, Cloudflare, Route 53, Namecheap — wherever your domain's nameservers point):
+**2. Add your destination address(es).** In Email Routing → Destination Addresses → **Add destination address**. Enter where alerts should go (e.g. `tickets@yourmsp.com` or your PSA's inbox). CF emails a verification link to that address. Click it once.
 
-- **SPF** — a `TXT` record on the root (e.g. `alerts.yourmsp.com`). Resend provides the exact value, something like `v=spf1 include:amazonses.com ~all`.
-- **DKIM** — a `TXT` record on a Resend-specified subdomain (e.g. `resend._domainkey.alerts.yourmsp.com`). Value is a long public key string.
+**3. Set `ALERT_FROM_ADDRESS`.** In the deploy form OR via Dashboard → Workers & Pages → your worker → Settings → Variables → Add Variable. Use any address @ the Email-Routing-enabled domain (e.g. `dropwatch@yourmsp.com`). This is the sender shown on alert emails.
 
-Copy the exact values from the Resend dashboard. Propagation typically takes 5–10 minutes. Resend's dashboard shows "Verified" once it's live.
+**4. Add an email channel in the dashboard.** Channels tab → Add channel → type: email, target: your verified destination address. Done.
 
-**3. Create an API key.** Resend dashboard → **API Keys → Create API Key**. Copy the key — it starts with `re_`.
+That's it. No DNS records, no SPF, no DKIM, no monthly email cap — just Cloudflare's native Email Routing. Works with any address you've verified as a destination on your account.
 
-**4. Fill in the deploy form.** When you click the Deploy-to-Cloudflare button, the form will prompt for `RESEND_API_KEY` (paste the `re_...` key) and `RESEND_FROM_ADDRESS` (e.g. `alerts@alerts.yourmsp.com` — must be on the verified domain). Both render as Secret fields, encrypted at rest.
-
-Already deployed? Add the Secrets after the fact in the Cloudflare dashboard: Workers & Pages → `domain-drop-watcher` → Settings → Variables and Secrets → **Add**, type `Secret`. Save then redeploy for the new values to take effect.
-
-> **Why not use Cloudflare's own email?** Cloudflare's `send_email` Worker binding requires every recipient address to be pre-verified on your Email Routing account — not a fit for MSP use where alerts go to arbitrary client addresses. MailChannels' free Workers relay ended in 2024. Resend is the current standard for transactional email from CF Workers. See [Cloudflare Email Routing docs](https://developers.cloudflare.com/email-routing/email-workers/send-email-workers/) for the verified-recipient constraint.
+> **Why not a third-party email service (Resend/Postmark/SendGrid)?** MSPs email themselves (tickets@, alerts@, PSA inboxes) — a fixed set of destinations you already own. Cloudflare's `send_email` binding is purpose-built for that pattern and free. Third-party email services add a signup, an API key, SPF/DKIM DNS records, and a monthly send cap. CF Email Routing skips all of that.
 
 ## Recovery
 
@@ -130,7 +140,6 @@ Already deployed? Add the Secrets after the fact in the Cloudflare dashboard: Wo
   5. Log in with the new token
 
 - **Compromised admin token** — same rotation procedure above. The old token is invalidated the moment the new Secret takes effect.
-- **Compromised Resend key** — revoke at resend.com, generate a new key, update via Cloudflare dashboard (Workers → your worker → Settings → Variables and Secrets), then redeploy.
 
 ## Free-tier budget
 
@@ -181,7 +190,7 @@ and `WORKER_URL` from env.
 
 | Channel | How | Notes |
 |---------|-----|-------|
-| Email | Resend API | Requires verified sending domain (SPF + DKIM). Free tier: 3k emails/mo, 100/day. |
+| Email | Cloudflare Email Routing `send_email` | Destination must be verified in Email Routing. Set `ALERT_FROM_ADDRESS` to a sender @ your Email-Routing-enabled domain. No API key, no DNS setup, no monthly cap. |
 | Microsoft Teams | Incoming webhook | Auto-detected via `*.webhook.office.com` host; formatted as MessageCard with `#e42e1b` accent. |
 | Slack | Incoming webhook | Auto-detected via `hooks.slack.com`; formatted as Block Kit blocks. |
 | Discord | Incoming webhook | Auto-detected via `discord.com/api/webhooks`; formatted as embed with `#e42e1b` color. |
@@ -302,6 +311,12 @@ Conventions:
 - No comments unless they document a non-obvious *why*. Well-named identifiers first.
 
 PR checklist: typecheck passes, tests pass, no new runtime dependencies.
+
+## A note from Ray
+
+This project was created for my buddy who owns a tiny tractor and a regular-sized plane. He said this would be a cool thing so I built a cool thing. It's likely going to be helpful to other MSPs as well. So it's FOSS. Enjoy.
+
+— Ray
 
 ## License
 
