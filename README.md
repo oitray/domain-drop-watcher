@@ -108,7 +108,7 @@ bootstrap cache.
 4. Optionally fill in `ALERT_FROM_ADDRESS` as a Secret in the deploy form if you want email alerts (must be @ a domain with Cloudflare Email Routing enabled). Leave blank for Teams/Slack/Discord webhooks only. No other fields are required.
 5. Click Deploy. Cloudflare provisions a D1 database and two KV namespaces automatically.
 6. Watch the build log stream in the Cloudflare dashboard. Near the end, the build script prints a banner containing your auto-generated admin token. Copy it.
-7. Visit your Worker URL. Log in with that token.
+7. **Visit your Worker URL** — shown at the top of the Cloudflare dashboard's Worker page as `https://<name>.<account>.workers.dev`. That's your admin dashboard. Paste the token from step 6 into the login card to enter.
 
 The admin token is generated during Workers Builds CI and stored as a Cloudflare Secret (encrypted at rest). It never appears in any HTTP response. Build logs are scoped to your Cloudflare account — the same trust boundary that already permits Secret reads.
 
@@ -198,8 +198,9 @@ changes before committing.
 
 <!-- TODO: dashboard screenshot -->
 
-The admin dashboard (`public/index.html`) is a vanilla-JS single-page app served
-by the Worker itself. No build step. Access it at your Worker URL.
+**Where to find it:** `https://<your-worker-name>.<your-cf-account>.workers.dev/` — the same URL Cloudflare shows at the top of your Worker's page in the CF dashboard. The admin dashboard is served directly from the root path; there's no separate login URL, no port, no path suffix. Open the URL, paste your admin token into the login card, done.
+
+The admin dashboard is a vanilla-JS single-page app served by the Worker itself (source: `public/index.html`). No build step, no external assets, no third-party scripts.
 
 - **Budget gauge** — live peak/min, daily checks, KV writes, free-tier headroom
 - **Global pause/resume** — stop all checks with one click
@@ -227,11 +228,29 @@ and `WORKER_URL` from env.
 All channels fan out in parallel via `Promise.allSettled` — one failed delivery
 does not block the others.
 
-## Security notes
+## Accessing the admin dashboard
 
-**Admin auth.** All `/domains`, `/channels`, `/budget`, `/events`, and `/check/*`
-routes require `Authorization: Bearer <ADMIN_TOKEN>`. Comparison uses
-`crypto.timingSafeEqual` to prevent timing attacks. `/health` is unauthenticated.
+Your Worker deploys to `https://<name>.<account>.workers.dev/`. Visit that URL in a browser — you'll see a login card asking for the admin token. Paste the token from your build log (or password manager) and you're in. The token is held in `sessionStorage` only, cleared when you close the tab.
+
+**Every request against `/domains`, `/channels`, `/budget`, `/events`, `/check/*`** carries `Authorization: Bearer <ADMIN_TOKEN>` and is compared using `crypto.timingSafeEqual`. A wrong token returns 401. The 256-bit generated token is infeasible to brute-force (keyspace ~10^77).
+
+### Harden further with Cloudflare Access (recommended for team use)
+
+The default `*.workers.dev` URL is publicly reachable, which means the login card is visible to anyone who discovers the URL via Certificate Transparency logs. The admin token alone is enough to keep them out, but if you want the dashboard to be completely invisible to the public internet — and you want SSO, 2FA, or per-operator login audit trails — put [Cloudflare Access (Zero Trust)](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-public-app/) in front of it. **Free for up to 50 users.**
+
+Setup (~5 minutes, all in the CF dashboard):
+
+1. **Cloudflare Dashboard → Zero Trust → Access → Applications → Add an application → Self-hosted**
+2. **Application domain**: your Worker URL (`<name>.<account>.workers.dev` or a custom domain if you've added one)
+3. **Identity provider**: pick one — One-time PIN (email link, no setup), Google, GitHub, Okta, Azure AD, or any SAML/OIDC provider
+4. **Access policy**: e.g. "Require email ending in `@yourmsp.com`" or "Include: specific emails: you@yourmsp.com"
+5. Save. Access is live immediately.
+
+After enabling, visiting your Worker URL shows Cloudflare's login page first. Only after identity verification does traffic reach the Worker. The admin token still protects API routes as defense-in-depth — so even an attacker who bypasses Access (e.g. a compromised SSO session) still faces the bearer-token wall.
+
+### Rotate the admin token anytime
+
+See [Recovery](#recovery) above. One-click: delete the Secret, redeploy, copy the new banner.
 
 **Dashboard CSP.** The HTML is served with
 `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'`.
