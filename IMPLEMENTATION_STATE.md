@@ -183,7 +183,7 @@ Wait — Phase 10 ended at 102. Subtracting setup-bootstrap (6) and adding boots
 
 ### Commit SHA
 
-Appended after commit.
+`1003eb0`
 
 ## Notes for Phase 9
 
