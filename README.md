@@ -312,9 +312,9 @@ Conventions:
 
 PR checklist: typecheck passes, tests pass, no new runtime dependencies.
 
-## A note from Ray
+## Acknowledgements
 
-This project was created for my buddy who owns a tiny tractor and a regular-sized plane. He said this would be a cool thing so I built a cool thing. It's likely going to be helpful to other MSPs as well. So it's FOSS. Enjoy.
+The idea for this tool came from a peer MSP operator who was watching the same client get repeatedly typosquatted and needed a defender-side way to catch the drops. He sketched the problem, I built the thing, and we agreed it ought to be FOSS so any MSP facing the same headache can just deploy it. Thanks for the nudge.
 
 — Ray
 
