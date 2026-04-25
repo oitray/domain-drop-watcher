@@ -1503,3 +1503,26 @@ describe("GET /auth/health", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /auth/empty-allowlist-status (public endpoint)
+// ---------------------------------------------------------------------------
+
+describe("GET /auth/empty-allowlist-status", () => {
+  it("returns {empty:true} when no users exist", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(noAuthReq("/auth/empty-allowlist-status"), env, NOOP_CTX);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { empty: boolean };
+    expect(body.empty).toBe(true);
+  });
+
+  it("returns {empty:false} when at least one user exists", async () => {
+    const env = makeEnv();
+    await mintSessionCookie(env, "alice@example.com");
+    const res = await handleAdmin(noAuthReq("/auth/empty-allowlist-status"), env, NOOP_CTX);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { empty: boolean };
+    expect(body.empty).toBe(false);
+  });
+});

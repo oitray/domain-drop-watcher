@@ -740,72 +740,150 @@ async function handleGetLogin(env: Env, db: D1Database): Promise<Response> {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>domain-drop-watcher sign in</title>
+<title>Domain Drop Watcher &mdash; Sign in</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:400px;margin:40px auto;padding:0 16px}
-.banner{padding:12px;border-radius:4px;margin-bottom:16px}
-.banner-warning{background:#fff3cd;border:1px solid #ffc107;color:#856404}
-label{display:block;margin-bottom:4px;font-weight:500}
-input,textarea{width:100%;box-sizing:border-box;padding:8px;margin-bottom:12px;border:1px solid #ccc;border-radius:4px;font-size:1rem}
-button{padding:8px 16px;background:#0066cc;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:1rem}
-button:hover{background:#0052a3}
-details{margin-top:16px}
-summary{cursor:pointer;color:#0066cc}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Barlow',Helvetica,system-ui,sans-serif;background:#f4f4f4;color:#414042;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px}
+.card{background:#fff;border-radius:8px;padding:32px 28px;width:100%;max-width:380px;box-shadow:0 4px 24px rgba(0,0,0,.12)}
+h1{font-size:20px;font-weight:700;color:#e42e1b;margin-bottom:4px}
+.subtitle{font-size:13px;color:#888;margin-bottom:20px}
+.banner{padding:12px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;line-height:1.5}
+.banner-warning{background:#fff3cd;border-left:4px solid #ffc107;color:#856404}
+label{display:block;font-size:13px;font-weight:500;margin-bottom:4px;color:#414042}
+input[type=email],input[type=text],input[type=password],textarea{width:100%;padding:9px 10px;border:1px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;color:#414042;background:#fff;margin-bottom:12px}
+input:focus,textarea:focus{outline:none;border-color:#e42e1b;box-shadow:0 0 0 2px rgba(228,46,27,.15)}
+.btn{display:block;width:100%;padding:10px 16px;border-radius:4px;font-size:14px;font-weight:500;cursor:pointer;border:none;font-family:inherit;text-align:center;margin-bottom:8px}
+.btn:focus-visible{outline:2px solid #e42e1b;outline-offset:2px}
+.btn-primary{background:#e42e1b;color:#fff}
+.btn-primary:hover{background:#c4260f}
+.btn-secondary{background:#fff;color:#414042;border:1px solid #ddd}
+.btn-secondary:hover{background:#f4f4f4}
+.divider{text-align:center;font-size:12px;color:#888;margin:12px 0;position:relative}
+.divider::before,.divider::after{content:'';position:absolute;top:50%;width:44%;height:1px;background:#ddd}
+.divider::before{left:0}.divider::after{right:0}
+details{margin-top:12px}
+summary{cursor:pointer;font-size:13px;color:#2980b9;list-style:none}
+summary::-webkit-details-marker{display:none}
+.details-body{margin-top:10px}
+textarea{resize:vertical;min-height:72px;font-family:monospace;font-size:0.85rem}
+#msg{font-size:13px;margin-top:8px;min-height:18px}
+#msg.error{color:#e42e1b}
+#msg.success{color:#27ae60}
 </style>
 </head>
 <body>
-<h1>Sign in</h1>
-${bannerHtml}
-<form id="email-form">
-  <label for="email">Email address</label>
-  <input type="email" id="email" name="email" required autocomplete="email">
-  <button type="submit">Send me a sign-in code</button>
-</form>
-<form id="code-form" style="display:none">
-  <label for="code">6-digit code</label>
-  <input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code">
-  <button type="submit">Verify code</button>
-</form>
-<div id="passkey-section"></div>
-<details ${emptyAllowlist ? "open" : ""}>
-  <summary>Break-glass: admin token</summary>
-  <form id="token-form">
-    <label for="admin-token">ADMIN_TOKEN</label>
-    <textarea id="admin-token" name="admin-token" rows="3" style="font-family:monospace;font-size:0.85rem"></textarea>
-    <button type="submit">Sign in with token</button>
+<div class="card">
+  <h1>Domain Drop Watcher</h1>
+  <p class="subtitle">Sign in to your dashboard</p>
+  ${bannerHtml}
+  <form id="email-form">
+    <label for="email">Email address</label>
+    <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com">
+    <button type="submit" class="btn btn-primary">Send me a sign-in code</button>
   </form>
-</details>
-<div id="msg" style="margin-top:12px;color:#c00"></div>
+  <form id="code-form" style="display:none">
+    <label for="code">6-digit code</label>
+    <input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" placeholder="000000">
+    <button type="submit" class="btn btn-primary">Verify code</button>
+    <button type="button" class="btn btn-secondary" id="back-to-email-btn">Back</button>
+  </form>
+  <div class="divider" id="passkey-divider">or</div>
+  <div id="passkey-section">
+    <button type="button" class="btn btn-secondary" id="passkey-btn">Sign in with a passkey</button>
+  </div>
+  <details ${emptyAllowlist ? "open" : ""} id="break-glass-details">
+    <summary>Break-glass: admin token</summary>
+    <div class="details-body">
+      <form id="token-form">
+        <label for="admin-token">ADMIN_TOKEN</label>
+        <textarea id="admin-token" name="admin-token" rows="3"></textarea>
+        <button type="submit" class="btn btn-secondary">Sign in with token</button>
+      </form>
+    </div>
+  </details>
+  <div id="msg" role="alert" aria-live="polite"></div>
+</div>
+<script src="/vendor/simplewebauthn-browser.js"></script>
 <script>
-const origin = location.origin;
 let pendingEmail = '';
+
+function setMsg(text, type) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = type || '';
+}
+
 document.getElementById('email-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   pendingEmail = document.getElementById('email').value;
-  const r = await fetch('/login/email-code', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:pendingEmail})});
+  const submitBtn = e.target.querySelector('button[type=submit]');
+  submitBtn.disabled = true;
+  setMsg('');
+  const r = await fetch('/login/email-code', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:pendingEmail})});
+  submitBtn.disabled = false;
   if (r.status === 429) {
     const j = await r.json();
-    document.getElementById('msg').textContent = 'Too many attempts. ' + (j.message || '');
+    setMsg('Too many attempts. ' + (j.message || 'Please wait before trying again.'), 'error');
   } else {
     document.getElementById('email-form').style.display='none';
     document.getElementById('code-form').style.display='block';
-    document.getElementById('msg').textContent = '';
+    setMsg('Check your email for a 6-digit code.', 'success');
+    document.getElementById('code').focus();
   }
 });
+
+document.getElementById('back-to-email-btn').addEventListener('click', () => {
+  document.getElementById('code-form').style.display='none';
+  document.getElementById('email-form').style.display='block';
+  setMsg('');
+});
+
 document.getElementById('code-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const code = document.getElementById('code').value;
-  const r = await fetch('/login/verify-code', {method:'POST',headers:{'Content-Type':'application/json','Origin':origin},body:JSON.stringify({email:pendingEmail,code})});
+  const submitBtn = e.target.querySelector('button[type=submit]');
+  submitBtn.disabled = true;
+  setMsg('');
+  const r = await fetch('/login/verify-code', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:pendingEmail,code})});
   const j = await r.json();
+  submitBtn.disabled = false;
   if (r.ok) { location.href = j.redirect || '/'; }
-  else { document.getElementById('msg').textContent = 'Invalid or expired code. Try again.'; }
+  else { setMsg('Invalid or expired code. Please try again.', 'error'); }
 });
+
+document.getElementById('passkey-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('passkey-btn');
+  btn.disabled = true;
+  btn.textContent = 'Waiting for passkey…';
+  setMsg('');
+  try {
+    const challengeRes = await fetch('/login/passkey/challenge', {credentials:'same-origin'});
+    if (!challengeRes.ok) { setMsg('Could not start passkey login. Try email code instead.', 'error'); return; }
+    const options = await challengeRes.json();
+    const assertionResp = await window.SimpleWebAuthnBrowser.startAuthentication({ optionsJSON: options });
+    const loginRes = await fetch('/login/passkey', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(assertionResp)});
+    const loginBody = await loginRes.json();
+    if (loginRes.ok) { location.href = loginBody.redirect || '/'; }
+    else { setMsg('Passkey authentication failed. Try email code instead.', 'error'); }
+  } catch(err) {
+    if (err && err.name === 'NotAllowedError') {
+      setMsg('Passkey cancelled or not available.', 'error');
+    } else {
+      setMsg('Passkey error: ' + String(err && err.message ? err.message : err), 'error');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign in with a passkey';
+  }
+});
+
 document.getElementById('token-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const token = document.getElementById('admin-token').value.trim();
-  const r = await fetch('/domains', {headers:{'Authorization':'Bearer '+token}});
+  setMsg('');
+  const r = await fetch('/domains', {credentials:'same-origin',headers:{'Authorization':'Bearer '+token}});
   if (r.ok) { location.href = '/'; }
-  else { document.getElementById('msg').textContent = 'Invalid admin token.'; }
+  else { setMsg('Invalid admin token.', 'error'); }
 });
 </script>
 </body>
@@ -1569,6 +1647,11 @@ export async function handleAdmin(
 
   if (pathname === "/login" && method === "GET") {
     return handleGetLogin(env, env.DB);
+  }
+
+  if (pathname === "/auth/empty-allowlist-status" && method === "GET") {
+    const count = await userCount(env.DB);
+    return json({ empty: count === 0 });
   }
 
   if (pathname === "/login/email-code" && method === "POST") {
