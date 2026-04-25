@@ -18,7 +18,13 @@ Domain Drop Watcher is a FOSS, self-hosted tool that watches a list of domains a
 
 ### Why this exists
 
-A peer's client was being repeatedly typosquatted by the same attacker. The registrar would take the malicious domain down on an abuse complaint — then release it back into the pool rather than transferring ownership. The attacker grabbed it again within minutes, sometimes at a different registrar. Rinse, repeat.
+This project was created for my buddy who owns a tiny tractor and a regular-sized plane. He said this would be a cool thing so I built a cool thing. It's likely going to be helpful to other MSPs as well. So it's FOSS. Enjoy.
+
+— Ray
+
+### The use case it prevents
+
+A client gets repeatedly typosquatted by the same attacker. The registrar takes the malicious domain down on an abuse complaint — then releases it back into the pool rather than transferring ownership. The attacker grabs it again within minutes, sometimes at a different registrar. Rinse, repeat.
 
 Commercial drop-catchers (DropCatch, SnapNames, Park.io, Dynadot Backorder) charge per domain and target *domainers* — people trying to snipe expiring inventory for resale — not defenders trying to protect a client's brand. They're also SaaS you'd be handing your watch-list to. No FOSS, self-hostable, defender-oriented option existed.
 
@@ -441,11 +447,6 @@ Conventions:
 
 PR checklist: typecheck passes, tests pass, no new runtime dependencies.
 
-## Acknowledgements
-
-This project was created for my buddy who owns a tiny tractor and a regular-sized plane. He said this would be a cool thing so I built a cool thing. It's likely going to be helpful to other MSPs as well. So it's FOSS. Enjoy.
-
-— Ray
 
 ## License
 
