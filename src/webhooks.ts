@@ -59,8 +59,12 @@ export function isWebhookAllowed(url: string, allowlist: string[]): AllowlistRes
   return { allowed: false, reason: "not-allowed" };
 }
 
-export function parseAllowlist(csv: string): string[] {
-  const source = csv ?? "";
+export const DEFAULT_WEBHOOK_HOST_ALLOWLIST =
+  "*.webhook.office.com,hooks.slack.com,discord.com,discordapp.com";
+
+export function parseAllowlist(csv: string | undefined): string[] {
+  const trimmed = (csv ?? "").trim();
+  const source = trimmed === "" ? DEFAULT_WEBHOOK_HOST_ALLOWLIST : trimmed;
   const seen = new Set<string>();
   const result: string[] = [];
   for (const entry of source.split(",")) {

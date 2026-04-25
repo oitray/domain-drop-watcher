@@ -115,9 +115,15 @@ describe("isWebhookAllowed — rejections", () => {
 });
 
 describe("parseAllowlist", () => {
-  it("returns empty array when env var is empty string", () => {
+  it("falls back to defaults when env var is empty string", () => {
     const result = parseAllowlist("");
-    expect(result).toEqual([]);
+    expect(result).toContain("*.webhook.office.com");
+    expect(result).toContain("hooks.slack.com");
+  });
+
+  it("falls back to defaults when env var is undefined", () => {
+    const result = parseAllowlist(undefined);
+    expect(result).toContain("*.webhook.office.com");
   });
 
   it("splits and trims entries", () => {
