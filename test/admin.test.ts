@@ -1492,7 +1492,7 @@ describe("GET /auth/health", () => {
     };
     expect(typeof body.email_routing_bound).toBe("boolean");
     expect(typeof body.admin_token_set).toBe("boolean");
-    expect(body.webauthn_available).toBe(false);
+    expect(body.webauthn_available).toBe(true);
     expect(typeof body.allowlist_size).toBe("number");
   });
 

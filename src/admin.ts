@@ -39,6 +39,16 @@ import {
   userCount,
   UserExistsError,
 } from "./auth/users.js";
+import {
+  beginPasskeyRegistration,
+  finishPasskeyRegistration,
+  beginPasskeyLogin,
+  finishPasskeyLogin,
+  listPasskeysForUser,
+  removePasskey,
+  rpIdFor,
+  originFor,
+} from "./auth/passkey.js";
 
 // ---------------------------------------------------------------------------
 // Auth identity
@@ -1216,6 +1226,295 @@ async function handleRevokeUserAllSessions(
 }
 
 // ---------------------------------------------------------------------------
+// Passkey routes
+// ---------------------------------------------------------------------------
+
+function randomBase64url(bytes: number): string {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+  let binary = "";
+  for (let i = 0; i < buf.length; i++) binary += String.fromCharCode(buf[i]!);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+async function handlePasskeyRegisterBegin(
+  req: Request,
+  env: Env,
+  db: D1Database,
+  identity: AuthIdentity,
+): Promise<Response> {
+  if (!identity.email) return jsonErr(403, "forbidden");
+
+  const now = Math.floor(Date.now() / 1000);
+  const user = await db
+    .prepare("SELECT email, user_id, added_at, last_login_at, disabled, role FROM users WHERE email = ?")
+    .bind(identity.email)
+    .first<{ email: string; user_id: string; added_at: number; last_login_at: number | null; disabled: number; role: string }>();
+
+  if (!user) return jsonErr(404, "not_found");
+
+  const challengeId = randomBase64url(32);
+
+  const options = await beginPasskeyRegistration(env, db, {
+    user: {
+      email: user.email,
+      userId: user.user_id,
+      addedAt: user.added_at,
+      lastLoginAt: user.last_login_at,
+      disabled: user.disabled !== 0,
+      role: user.role,
+    },
+    requestUrl: req.url,
+    challengeId,
+    now,
+  });
+
+  const challengeCookie = `dropwatch_pk_challenge=${challengeId}; HttpOnly; Secure; SameSite=Lax; Path=/passkeys; Max-Age=300`;
+
+  return new Response(JSON.stringify(options), {
+    status: 200,
+    headers: { ...JSON_HEADERS, "Set-Cookie": challengeCookie },
+  });
+}
+
+async function handlePasskeyRegisterFinish(
+  req: Request,
+  env: Env,
+  db: D1Database,
+  identity: AuthIdentity,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (!identity.email) return jsonErr(403, "forbidden");
+
+  const workerOrigin = new URL(req.url).origin;
+  const reqOrigin = req.headers.get("Origin");
+  if (!reqOrigin || reqOrigin !== workerOrigin) {
+    return jsonErr(403, "forbidden", { message: "Origin header mismatch" });
+  }
+
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const cookieMatch = /(?:^|;\s*)dropwatch_pk_challenge=([^\s;]+)/.exec(cookieHeader);
+  const challengeId = cookieMatch?.[1] ?? "";
+
+  const clearChallengeCookie = "dropwatch_pk_challenge=; HttpOnly; Secure; SameSite=Lax; Path=/passkeys; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+
+  if (!challengeId) {
+    return new Response(JSON.stringify({ ok: false, reason: "no_challenge" }), {
+      status: 400,
+      headers: { ...JSON_HEADERS, "Set-Cookie": clearChallengeCookie },
+    });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ ok: false, reason: "invalid_body" }), {
+      status: 400,
+      headers: { ...JSON_HEADERS, "Set-Cookie": clearChallengeCookie },
+    });
+  }
+
+  const userRow = await db
+    .prepare("SELECT email, user_id, added_at, last_login_at, disabled, role FROM users WHERE email = ?")
+    .bind(identity.email)
+    .first<{ email: string; user_id: string; added_at: number; last_login_at: number | null; disabled: number; role: string }>();
+
+  if (!userRow) {
+    return new Response(JSON.stringify({ ok: false, reason: "not_found" }), {
+      status: 404,
+      headers: { ...JSON_HEADERS, "Set-Cookie": clearChallengeCookie },
+    });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const bodyObj = body as Record<string, unknown>;
+  const deviceName = typeof bodyObj["deviceName"] === "string" ? bodyObj["deviceName"] : null;
+
+  const result = await finishPasskeyRegistration(env, db, {
+    user: {
+      email: userRow.email,
+      userId: userRow.user_id,
+      addedAt: userRow.added_at,
+      lastLoginAt: userRow.last_login_at,
+      disabled: userRow.disabled !== 0,
+      role: userRow.role,
+    },
+    requestUrl: req.url,
+    challengeId,
+    attestationResponse: body as Parameters<typeof finishPasskeyRegistration>[2]["attestationResponse"],
+    deviceName,
+    now,
+  });
+
+  if (result.ok) {
+    ctx.waitUntil(
+      logAuthEvent(db, {
+        email: identity.email,
+        event_type: "passkey_enrolled",
+        auth_method: "passkey",
+        ip_address: req.headers.get("CF-Connecting-IP"),
+        user_agent: req.headers.get("User-Agent"),
+        metadata: JSON.stringify({ device_name: deviceName }),
+      }),
+    );
+    return new Response(JSON.stringify({ ok: true, credentialId: result.credentialId }), {
+      status: 200,
+      headers: { ...JSON_HEADERS, "Set-Cookie": clearChallengeCookie },
+    });
+  }
+
+  return new Response(JSON.stringify({ ok: false, reason: result.reason }), {
+    status: 400,
+    headers: { ...JSON_HEADERS, "Set-Cookie": clearChallengeCookie },
+  });
+}
+
+async function handleGetPasskeys(
+  db: D1Database,
+  identity: AuthIdentity,
+): Promise<Response> {
+  if (!identity.email) return jsonErr(403, "forbidden");
+
+  const passkeys = await listPasskeysForUser(db, identity.email);
+  const sanitized = passkeys.map((p) => ({
+    credentialId: p.credentialId,
+    deviceName: p.deviceName,
+    createdAt: p.createdAt,
+    lastUsedAt: p.lastUsedAt,
+    transports: p.transports,
+  }));
+  return json(sanitized);
+}
+
+async function handleDeletePasskey(
+  credentialId: string,
+  req: Request,
+  db: D1Database,
+  identity: AuthIdentity,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (!identity.email) return jsonErr(403, "forbidden");
+
+  const deleted = await removePasskey(db, credentialId, identity.email);
+  if (!deleted) return jsonErr(404, "not_found");
+
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: identity.email,
+      event_type: "passkey_removed",
+      auth_method: null,
+      ip_address: req.headers.get("CF-Connecting-IP"),
+      user_agent: req.headers.get("User-Agent"),
+      metadata: JSON.stringify({ credential_id: credentialId }),
+    }),
+  );
+  return json({ deleted: true });
+}
+
+async function handlePasskeyLoginChallenge(
+  req: Request,
+  env: Env,
+  db: D1Database,
+): Promise<Response> {
+  const now = Math.floor(Date.now() / 1000);
+  const tempId = randomBase64url(32);
+
+  const options = await beginPasskeyLogin(env, db, {
+    requestUrl: req.url,
+    tempId,
+    now,
+  });
+
+  const tempCookie = `dropwatch_pk_tempid=${tempId}; HttpOnly; Secure; SameSite=Lax; Path=/login; Max-Age=300`;
+
+  return new Response(JSON.stringify(options), {
+    status: 200,
+    headers: { ...JSON_HEADERS, "Set-Cookie": tempCookie },
+  });
+}
+
+async function handlePasskeyLogin(
+  req: Request,
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const workerOrigin = new URL(req.url).origin;
+  const reqOrigin = req.headers.get("Origin");
+  if (!reqOrigin || reqOrigin !== workerOrigin) {
+    return jsonErr(403, "forbidden", { message: "Origin header mismatch" });
+  }
+
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const cookieMatch = /(?:^|;\s*)dropwatch_pk_tempid=([^\s;]+)/.exec(cookieHeader);
+  const tempId = cookieMatch?.[1] ?? "";
+
+  if (!tempId) return jsonErr(400, "no_challenge");
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return jsonErr(400, "invalid_body");
+  }
+
+  const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
+  const ua = req.headers.get("User-Agent") ?? null;
+  const now = Math.floor(Date.now() / 1000);
+
+  const result = await finishPasskeyLogin(env, db, {
+    requestUrl: req.url,
+    tempId,
+    assertionResponse: body as Parameters<typeof finishPasskeyLogin>[2]["assertionResponse"],
+    now,
+  });
+
+  if (result.ok) {
+    const session = await createSession(env, db, {
+      email: result.user.email,
+      authMethod: "passkey",
+      userAgent: ua,
+      ipAddress: ip,
+    });
+
+    await recordUserLogin(db, result.user.email, now);
+
+    ctx.waitUntil(recordLoginAttempt(db, "email", result.user.email, "passkey_ok", now));
+    ctx.waitUntil(recordLoginAttempt(db, "ip", ip, "passkey_ok", now));
+    ctx.waitUntil(
+      logAuthEvent(db, {
+        email: result.user.email,
+        event_type: "login_ok",
+        auth_method: "passkey",
+        ip_address: ip,
+        user_agent: ua,
+      }),
+    );
+
+    return new Response(JSON.stringify({ ok: true, redirect: "/" }), {
+      status: 200,
+      headers: { ...JSON_HEADERS, "Set-Cookie": serializeSessionCookie(session.cookieValue) },
+    });
+  }
+
+  ctx.waitUntil(recordLoginAttempt(db, "email", "unknown", "passkey_fail", now));
+  ctx.waitUntil(recordLoginAttempt(db, "ip", ip, "passkey_fail", now));
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: null,
+      event_type: "login_fail",
+      auth_method: "passkey",
+      ip_address: ip,
+      user_agent: ua,
+      metadata: JSON.stringify({ reason: result.reason }),
+    }),
+  );
+
+  return jsonErr(401, "passkey_auth_failed", { reason: result.reason });
+}
+
+// ---------------------------------------------------------------------------
 // GET /auth/health (bearer-only)
 // ---------------------------------------------------------------------------
 
@@ -1228,7 +1527,7 @@ async function handleAuthHealth(env: Env, db: D1Database): Promise<Response> {
     admin_token_set: !!resolveAdminToken(env),
     allowlist_size: count,
     rp_id: env.WEBAUTHN_RP_ID ?? null,
-    webauthn_available: false,
+    webauthn_available: true,
   });
 }
 
@@ -1278,6 +1577,14 @@ export async function handleAdmin(
 
   if (pathname === "/login/verify-code" && method === "POST") {
     return handlePostLoginVerifyCode(req, env, env.DB, ctx);
+  }
+
+  if (pathname === "/login/passkey/challenge" && method === "GET") {
+    return handlePasskeyLoginChallenge(req, env, env.DB);
+  }
+
+  if (pathname === "/login/passkey" && method === "POST") {
+    return handlePasskeyLogin(req, env, env.DB, ctx);
   }
 
   const identity = await authenticate(req, env, env.DB);
@@ -1347,6 +1654,22 @@ export async function handleAdmin(
   if (sessionDeleteMatch && method === "DELETE") {
     const sessionId = decodeURIComponent(sessionDeleteMatch[1] ?? "");
     return handleDeleteSession(sessionId, req, env.DB, identity, ctx);
+  }
+
+  if (pathname === "/passkeys/register/begin" && method === "POST") {
+    return handlePasskeyRegisterBegin(req, env, env.DB, identity);
+  }
+  if (pathname === "/passkeys/register/finish" && method === "POST") {
+    return handlePasskeyRegisterFinish(req, env, env.DB, identity, ctx);
+  }
+  if (pathname === "/passkeys" && method === "GET") {
+    return handleGetPasskeys(env.DB, identity);
+  }
+
+  const passkeyDeleteMatch = /^\/passkeys\/([^/]+)$/.exec(pathname);
+  if (passkeyDeleteMatch && method === "DELETE") {
+    const credentialId = decodeURIComponent(passkeyDeleteMatch[1] ?? "");
+    return handleDeletePasskey(credentialId, req, env.DB, identity, ctx);
   }
 
   if (pathname === "/domains" && method === "GET") return handleGetDomains(env);

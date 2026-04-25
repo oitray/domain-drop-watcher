@@ -66,6 +66,7 @@ _none yet_
 ## Phase 12 — Multi-user auth (in progress, branch: feat/868jd3n6k-magic-link-passkey-auth)
 
 - Phase 6 integrated: `authenticate` middleware, login/logout/users/sessions routes, scheduled cron cleanup.
+- Phase 7 landed: passkey (WebAuthn) module + routes. `@simplewebauthn/server@13.3.0` runtime dep. Vendored `@simplewebauthn/browser@13.3.0` UMD bundle at `public/vendor/simplewebauthn-browser.js` (9,269 bytes). `/auth/health` now returns `webauthn_available: true`.
 
 ## Phase 10 — CF Deploy Button migration (2026-04-23)
 
