@@ -63,6 +63,73 @@ Update these checkboxes as you complete work. Include commit SHA.
 
 _none yet_
 
+## Phase 12 — Multi-user auth (shipped, branch: feat/868jd3n6k-magic-link-passkey-auth)
+
+### Schema
+
+7 new D1 tables (all `CREATE TABLE IF NOT EXISTS`, additive):
+
+- `users` — email allowlist with stable `user_id` UUID (WebAuthn userHandle), `disabled` flag, `role` column
+- `login_codes` — hashed 6-digit codes, one-time-use, 10-minute expiry, per-code `verify_attempts` counter
+- `sessions` — active sessions keyed by random 32-byte base64url session ID, 12-hour TTL
+- `passkeys` — WebAuthn credentials: `credential_id`, `public_key` (BLOB), `counter`, `transports`
+- `login_attempts` — rate-limit log; `subject_type` ('email'|'ip') + `subject_key` columns prevent namespace collision
+- `auth_events` — durable audit log (90-day retention), separate from KV event ring
+- `auth_challenges` — ephemeral WebAuthn challenges, 5-minute TTL
+
+### Modules
+
+- `src/auth/session.ts` — `createSession`, `verifySessionCookie`, `revokeSession`, HMAC sign/verify, cookie serialization
+- `src/auth/magic-link.ts` — `issueLoginCode`, `redeemLoginCode`; uses `env.EMAIL.send()`
+- `src/auth/rate-limit.ts` — `checkSendCodeRate`, `checkVerifyCodeRate`, `recordLoginAttempt`
+- `src/auth/users.ts` — `addUser`, `removeUser`, `setUserDisabled`, `userCount`, `listUsers`, `recordUserLogin`
+- `src/auth/passkey.ts` — thin wrapper over `@simplewebauthn/server@13.3.0`; challenge storage in `auth_challenges`
+
+### Routes
+
+Public (no auth required):
+- `GET /login` — login page with email-code form, passkey button, break-glass section
+- `GET /auth/empty-allowlist-status` — returns `{empty: bool}` (used by login page to auto-expand break-glass)
+- `POST /login/email-code` — request a 6-digit sign-in code; always returns 202
+- `POST /login/verify-code` — redeem code, create session, set cookie
+- `GET /login/passkey/challenge` — generate WebAuthn authentication challenge
+- `POST /login/passkey` — verify assertion, create session
+
+Session or bearer authenticated:
+- `POST /logout` — revoke session, clear cookie
+- `GET /users`, `POST /users`, `DELETE /users/:email`
+- `POST /users/:email/disable`, `POST /users/:email/enable`
+- `POST /users/:email/sessions/revoke-all`
+- `GET /sessions`, `DELETE /sessions/:session_id`, `POST /sessions/revoke-all`
+- `GET /passkeys`, `POST /passkeys/register/begin`, `POST /passkeys/register/finish`, `DELETE /passkeys/:credential_id`
+
+Bearer break-glass only:
+- `GET /auth/health` — returns `{email_routing_bound, alert_from_set, session_secret_set, admin_token_set, allowlist_size, rp_id, webauthn_available}`
+
+### Auth middleware
+
+`authenticate()` in `src/admin.ts` replaces the old `checkAuth`. Tries session cookie first (HMAC verify → D1 session lookup → user disabled check), then falls back to `Authorization: Bearer` break-glass. Returns `AuthIdentity {email, method}` or null.
+
+### Cleanup cron
+
+Attached to the existing 1-minute scheduled handler (`src/worker.ts`). Runs once per 6-hour window (`now % 21600 < 60`). Prunes:
+- `login_attempts`, `login_codes`, `sessions`, `auth_challenges` — expired rows (LIMIT 5000 per run)
+- `auth_events` — rows older than 90 days (LIMIT 5000 per run)
+
+No additional cron trigger required; runs within the existing free-tier slot.
+
+### Front-end
+
+`public/index.html` rewritten with login page (email form + passkey button + break-glass section) and new Settings tabs: Users, Passkeys, Sessions. Vendored `@simplewebauthn/browser@13.3.0` UMD bundle at `public/vendor/simplewebauthn-browser.js` (9,269 bytes).
+
+### Runtime dependency
+
+`@simplewebauthn/server@13.3.0` — MIT, pure-JS, CF Workers compatible.
+
+### Test count
+
+198 tests, 12 test files (`npx vitest run`, all passing).
+
 ## Phase 10 — CF Deploy Button migration (2026-04-23)
 
 ### Summary

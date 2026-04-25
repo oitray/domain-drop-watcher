@@ -43,7 +43,7 @@ function makeExecFileSync(listOutput: string | Error, putError?: Error): ExecFil
 describe('bootstrap-admin-token.mjs main()', () => {
   it('does not call wrangler secret put when ADMIN_TOKEN already listed', async () => {
     const main = await getMain()
-    const listJson = JSON.stringify([{ name: 'ADMIN_TOKEN' }, { name: 'OTHER_SECRET' }])
+    const listJson = JSON.stringify([{ name: 'ADMIN_TOKEN' }, { name: 'SESSION_SECRET' }, { name: 'OTHER_SECRET' }])
     const mockExec = makeExecFileSync(listJson)
 
     await main({ execFileSync: mockExec })
@@ -54,15 +54,15 @@ describe('bootstrap-admin-token.mjs main()', () => {
 
   it('generates a 43-char URL-safe base64 token and calls wrangler secret put via stdin when ADMIN_TOKEN absent', async () => {
     const main = await getMain()
-    const listJson = JSON.stringify([{ name: 'OTHER_SECRET' }])
+    const listJson = JSON.stringify([{ name: 'OTHER_SECRET' }, { name: 'SESSION_SECRET' }])
     const mockExec = makeExecFileSync(listJson)
 
     await main({ execFileSync: mockExec })
 
-    const putCalls = mockExec.calls.filter(([, args]) => args[1] === 'put')
-    expect(putCalls.length).toBe(1)
+    const adminPutCalls = mockExec.calls.filter(([, args]) => args[1] === 'put' && args[2] === 'ADMIN_TOKEN')
+    expect(adminPutCalls.length).toBe(1)
 
-    const [cmd, args, opts] = putCalls[0]! as [string, string[], { input: string }]
+    const [cmd, args, opts] = adminPutCalls[0]! as [string, string[], { input: string }]
     expect(cmd).toBe('wrangler')
     expect(args).toEqual(['secret', 'put', 'ADMIN_TOKEN', '--name', 'domain-drop-watcher'])
     expect(typeof opts.input).toBe('string')
@@ -71,12 +71,12 @@ describe('bootstrap-admin-token.mjs main()', () => {
 
   it('generated token is exactly 43 chars and matches URL-safe base64 charset', async () => {
     const main = await getMain()
-    const listJson = JSON.stringify([])
+    const listJson = JSON.stringify([{ name: 'SESSION_SECRET' }])
     const capturedInputs: string[] = []
 
     const mockExec: ExecFileSyncFn = (cmd, args, opts) => {
       if (args[0] === 'secret' && args[1] === 'list') return listJson
-      if (args[0] === 'secret' && args[1] === 'put' && opts?.input) capturedInputs.push(opts.input)
+      if (args[0] === 'secret' && args[1] === 'put' && args[2] === 'ADMIN_TOKEN' && opts?.input) capturedInputs.push(opts.input)
       return ''
     }
 
@@ -97,11 +97,78 @@ describe('bootstrap-admin-token.mjs main()', () => {
     await main({ execFileSync: mockExec })
 
     const putCalls = mockExec.calls.filter(([, args]) => args[1] === 'put')
-    expect(putCalls.length).toBe(1)
+    expect(putCalls.length).toBe(2)
 
     const networkError = new Error('network timeout')
     const mockExecBad = makeExecFileSync(networkError)
 
     await expect(main({ execFileSync: mockExecBad })).rejects.toThrow('wrangler secret list failed unexpectedly')
+  })
+
+  it('generates SESSION_SECRET when absent and calls wrangler secret put with a 43-char base64url value', async () => {
+    const main = await getMain()
+    const listJson = JSON.stringify([{ name: 'ADMIN_TOKEN' }])
+    const mockExec = makeExecFileSync(listJson)
+
+    await main({ execFileSync: mockExec })
+
+    const putCalls = mockExec.calls.filter(([, args]) => args[1] === 'put')
+    expect(putCalls.length).toBe(1)
+
+    const [cmd, args, opts] = putCalls[0]! as [string, string[], { input: string }]
+    expect(cmd).toBe('wrangler')
+    expect(args).toEqual(['secret', 'put', 'SESSION_SECRET', '--name', 'domain-drop-watcher'])
+    expect(typeof opts.input).toBe('string')
+    expect(BASE64URL_43_RE.test(opts.input)).toBe(true)
+  })
+
+  it('does not call wrangler secret put when both ADMIN_TOKEN and SESSION_SECRET already exist', async () => {
+    const main = await getMain()
+    const listJson = JSON.stringify([{ name: 'ADMIN_TOKEN' }, { name: 'SESSION_SECRET' }])
+    const mockExec = makeExecFileSync(listJson)
+
+    await main({ execFileSync: mockExec })
+
+    const putCalls = mockExec.calls.filter(([, args]) => args[1] === 'put')
+    expect(putCalls.length).toBe(0)
+  })
+
+  it('generates both ADMIN_TOKEN and SESSION_SECRET when both are absent', async () => {
+    const main = await getMain()
+    const listJson = JSON.stringify([])
+    const mockExec = makeExecFileSync(listJson)
+
+    await main({ execFileSync: mockExec })
+
+    const putCalls = mockExec.calls.filter(([, args]) => args[1] === 'put')
+    expect(putCalls.length).toBe(2)
+
+    const secretNames = putCalls.map(([, args]) => args[2])
+    expect(secretNames).toContain('ADMIN_TOKEN')
+    expect(secretNames).toContain('SESSION_SECRET')
+
+    for (const [, , opts] of putCalls as Array<[string, string[], { input: string }]>) {
+      expect(BASE64URL_43_RE.test(opts.input)).toBe(true)
+    }
+  })
+
+  it('generates only SESSION_SECRET when ADMIN_TOKEN already exists but SESSION_SECRET is absent', async () => {
+    const main = await getMain()
+    const listJson = JSON.stringify([{ name: 'ADMIN_TOKEN' }])
+    const capturedPuts: Array<{ name: string; input: string }> = []
+
+    const mockExec: ExecFileSyncFn = (cmd, args, opts) => {
+      if (args[0] === 'secret' && args[1] === 'list') return listJson
+      if (args[0] === 'secret' && args[1] === 'put') {
+        capturedPuts.push({ name: args[2]!, input: (opts as { input: string }).input })
+      }
+      return ''
+    }
+
+    await main({ execFileSync: mockExec })
+
+    expect(capturedPuts.length).toBe(1)
+    expect(capturedPuts[0]!.name).toBe('SESSION_SECRET')
+    expect(BASE64URL_43_RE.test(capturedPuts[0]!.input)).toBe(true)
   })
 })

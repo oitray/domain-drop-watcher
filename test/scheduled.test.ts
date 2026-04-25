@@ -244,7 +244,7 @@ function makeEnv(opts?: {
     EVENTS: events,
     BOOTSTRAP: makeKV(),
     ADMIN_TOKEN: "test-token",
-    WEBHOOK_HOST_ALLOWLIST_DEFAULT: "*.webhook.office.com,hooks.slack.com,discord.com",
+    WEBHOOK_HOST_ALLOWLIST: "*.webhook.office.com,hooks.slack.com,discord.com",
     VERSION: "test",
   } as unknown as Env & { DB: D1Database & { _tables: Record<string, Row[]> }; EVENTS: KVNamespace & { _store: Map<string, string> } };
 }

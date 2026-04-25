@@ -2,23 +2,33 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { handleAdmin } from "../src/admin.js";
 import type { Env } from "../src/types.js";
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
+import { createSession } from "../src/auth/session.js";
 
 // ---------------------------------------------------------------------------
-// In-memory D1 mock
+// In-memory D1 mock — supports all tables including auth tables
 // ---------------------------------------------------------------------------
 
 interface Row {
   [key: string]: unknown;
 }
 
-type TableName = "domains" | "channels" | "domain_channels" | "config";
+type CoreTableName = "domains" | "channels" | "domain_channels" | "config";
+type AuthTableName = "users" | "sessions" | "login_codes" | "login_attempts" | "auth_events" | "auth_challenges" | "passkeys";
+type TableName = CoreTableName | AuthTableName;
 
-function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
+function makeD1(seed?: { [table in CoreTableName]?: Row[] }): D1Database {
   const tables: { [table in TableName]: Row[] } = {
     domains: seed?.domains ?? [],
     channels: seed?.channels ?? [],
     domain_channels: seed?.domain_channels ?? [],
     config: seed?.config ?? [],
+    users: [],
+    sessions: [],
+    login_codes: [],
+    login_attempts: [],
+    auth_events: [],
+    auth_challenges: [],
+    passkeys: [],
   };
 
   function matchTable(sql: string): TableName | null {
@@ -27,6 +37,13 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
     if (lower.includes("from channels") || lower.includes("into channels") || lower.includes("update channels") || lower.includes("delete from channels")) return "channels";
     if (lower.includes("from domain_channels") || lower.includes("into domain_channels") || lower.includes("delete from domain_channels")) return "domain_channels";
     if (lower.includes("from config") || lower.includes("into config") || lower.includes("update config")) return "config";
+    if (lower.includes("from users") || lower.includes("into users") || lower.includes("update users") || lower.includes("delete from users")) return "users";
+    if (lower.includes("from sessions") || lower.includes("into sessions") || lower.includes("update sessions") || lower.includes("delete from sessions")) return "sessions";
+    if (lower.includes("from login_codes") || lower.includes("into login_codes") || lower.includes("update login_codes") || lower.includes("delete from login_codes")) return "login_codes";
+    if (lower.includes("from login_attempts") || lower.includes("into login_attempts") || lower.includes("delete from login_attempts")) return "login_attempts";
+    if (lower.includes("from auth_events") || lower.includes("into auth_events") || lower.includes("delete from auth_events")) return "auth_events";
+    if (lower.includes("from auth_challenges") || lower.includes("into auth_challenges") || lower.includes("delete from auth_challenges")) return "auth_challenges";
+    if (lower.includes("from passkeys") || lower.includes("into passkeys") || lower.includes("delete from passkeys")) return "passkeys";
     return null;
   }
 
@@ -38,59 +55,140 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
     if (lower.startsWith("select")) {
       if (!table) return { results: [], changes: 0, last_row_id: 0 };
 
+      // JOIN sessions + users (verifySessionCookie)
+      if (lower.includes("join users") && lower.includes("from sessions")) {
+        const sessionId = bindings[0] as string;
+        const now = bindings[1] as number;
+        const session = tables.sessions.find(
+          (s) => s["session_id"] === sessionId && (s["expires_at"] as number) > now,
+        );
+        if (!session) return { results: [], changes: 0, last_row_id: 0 };
+        const user = tables.users.find((u) => u["email"] === session["email"]);
+        if (!user) return { results: [], changes: 0, last_row_id: 0 };
+        return {
+          results: [{
+            session_id: session["session_id"],
+            email: session["email"],
+            auth_method: session["auth_method"],
+            expires_at: session["expires_at"],
+            disabled: user["disabled"] ?? 0,
+          }],
+          changes: 0,
+          last_row_id: 0,
+        };
+      }
+
+      // COUNT(*) for users
+      if (lower.includes("count(*)") && lower.includes("from users")) {
+        return { results: [{ cnt: tables.users.length }], changes: 0, last_row_id: 0 };
+      }
+
+      // COUNT(*) for sessions WHERE email = ? AND expires_at > ?
+      if (lower.includes("count(*)") && lower.includes("from sessions")) {
+        const email = bindings[0] as string;
+        const nowTs = bindings[1] as number;
+        const cnt = tables.sessions.filter(
+          (s) => s["email"] === email && (s["expires_at"] as number) > nowTs,
+        ).length;
+        return { results: [{ cnt }], changes: 0, last_row_id: 0 };
+      }
+
+      // SELECT from sessions WHERE email = ? AND expires_at > ? ORDER BY
+      if (table === "sessions" && lower.includes("where email")) {
+        const email = bindings[0] as string;
+        const nowTs = bindings[1] as number;
+        const rows = tables.sessions.filter(
+          (s) => s["email"] === email && (s["expires_at"] as number) > nowTs,
+        );
+        return { results: rows, changes: 0, last_row_id: 0 };
+      }
+
+      // SELECT from users
+      if (table === "users") {
+        if (lower.includes("where email")) {
+          const email = bindings[0] as string;
+          const row = tables.users.find((u) => u["email"] === email) ?? null;
+          return { results: row ? [row] : [], changes: 0, last_row_id: 0 };
+        }
+        // ORDER BY added_at
+        return { results: [...tables.users], changes: 0, last_row_id: 0 };
+      }
+
+      // SELECT from login_codes
+      if (table === "login_codes") {
+        const hash = bindings[0] as string;
+        const email = bindings[1] as string;
+        const row = tables.login_codes.find(
+          (c) => c["code_hash"] === hash && c["email"] === email && c["used_at"] === null,
+        );
+        return { results: row ? [row] : [], changes: 0, last_row_id: 0 };
+      }
+
+      // SELECT from login_attempts — COUNT for rate limiting.
+      // subject_type may be literal in SQL or a binding; bindings are [subjectKey, windowTs].
+      if (table === "login_attempts" && lower.includes("count(*)")) {
+        const literalTypeMatch = /subject_type\s*=\s*'([^']+)'/.exec(lower);
+        const subjectType = literalTypeMatch?.[1] ?? null;
+        const subjectKey = bindings[0] as string;
+        const windowTs = bindings[1] as number;
+        let rows = tables.login_attempts.filter(
+          (r) => (subjectType ? r["subject_type"] === subjectType : true)
+              && r["subject_key"] === subjectKey
+              && (r["ts"] as number) > windowTs,
+        );
+        if (lower.includes("event_type in")) {
+          rows = rows.filter((r) => r["event_type"] === "code_sent" || r["event_type"] === "code_verify_fail");
+        } else if (lower.includes("event_type = 'code_verify_fail'")) {
+          rows = rows.filter((r) => r["event_type"] === "code_verify_fail");
+        }
+        return { results: [{ n: rows.length }], changes: 0, last_row_id: 0 };
+      }
+
       let rows = [...tables[table]];
 
-      // Handle WHERE conditions (simplified for our use case)
+      // WHERE conditions
       if (lower.includes("where")) {
-        // fqdn = ?
         const fqdnMatch = /where\s+(?:dc\.)?fqdn\s*=\s*\?/.exec(lower);
         if (fqdnMatch) {
           const val = bindings[0] as string;
           rows = rows.filter((r) => r["fqdn"] === val);
           bindings = bindings.slice(1);
         }
-        // channel_id = ?
         const chIdMatch = /where\s+channel_id\s*=\s*\?/.exec(lower);
         if (chIdMatch) {
           const val = bindings[0] as string;
           rows = rows.filter((r) => r["channel_id"] === val);
           bindings = bindings.slice(1);
         }
-        // id = ?
         const idMatch = /where\s+(?:c\.)?id\s*=\s*\?/.exec(lower);
         if (idMatch) {
           const val = bindings[0] as string;
           rows = rows.filter((r) => r["id"] === val);
           bindings = bindings.slice(1);
         }
-        // k = ?
         const kMatch = /where\s+k\s*=\s*\?/.exec(lower);
         if (kMatch) {
           const val = bindings[0] as string;
           rows = rows.filter((r) => r["k"] === val);
           bindings = bindings.slice(1);
         }
-        // paused = 0 AND tld_supported = 1
         if (lower.includes("paused = 0")) {
           rows = rows.filter((r) => r["paused"] === 0);
         }
         if (lower.includes("tld_supported = 1")) {
           rows = rows.filter((r) => r["tld_supported"] === 1);
         }
-        // next_due_at <= ?
         if (lower.includes("next_due_at <=")) {
           const val = bindings[0] as number;
           rows = rows.filter((r) => (r["next_due_at"] as number) <= val);
           bindings = bindings.slice(1);
         }
-        // dc join
         if (lower.includes("join domain_channels dc")) {
           const dcRows = tables["domain_channels"];
           rows = rows.filter((ch) => dcRows.some((dc) => dc["channel_id"] === ch["id"] && dc["fqdn"] === bindings[0]));
         }
       }
 
-      // LIMIT
       const limitMatch = /limit\s+(\d+)/.exec(lower);
       if (limitMatch) {
         const lim = parseInt(limitMatch[1] ?? "0", 10);
@@ -104,7 +202,6 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
     if (lower.startsWith("insert")) {
       if (!table) return { results: [], changes: 0, last_row_id: 0 };
 
-      // INSERT INTO config ... ON CONFLICT
       if (table === "config" && lower.includes("on conflict")) {
         const k = bindings[0] as string;
         const v = bindings[1] as string;
@@ -117,7 +214,6 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
         return { results: [], changes: 1, last_row_id: 0 };
       }
 
-      // INSERT OR IGNORE INTO domain_channels
       if (table === "domain_channels") {
         const fqdn = bindings[0] as string;
         const channel_id = bindings[1] as string;
@@ -129,7 +225,6 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
         return { results: [], changes: 0, last_row_id: 0 };
       }
 
-      // INSERT INTO channels
       if (table === "channels") {
         const row: Row = {
           id: bindings[0],
@@ -144,12 +239,7 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
         return { results: [], changes: 1, last_row_id: 0 };
       }
 
-      // INSERT INTO domains with CTE budget check
       if (table === "domains" && lower.includes("with minutes")) {
-        // Extract proposed cadence_minutes and phase_offset for the budget CTE
-        // Binding order from upsertDomainWithBudgetCheck:
-        // fqdn, cadence_minutes, phase_offset_minutes, next_due_at, paused, notify_on, label, tld_supported,
-        // lcmWindow-1, cadence_minutes, phase_offset_minutes, subreqLimit
         const fqdn = bindings[0] as string;
         const cadence_minutes = bindings[1] as number;
         const phase_offset_minutes = bindings[2] as number;
@@ -158,10 +248,8 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
         const notify_on = bindings[5] as string;
         const label = bindings[6] as string | null;
         const tld_supported = bindings[7] as number;
-        // bindings[8] = lcmWindow-1, bindings[9] = cadence, bindings[10] = offset, bindings[11] = limit
         const subreqLimit = bindings[11] as number;
 
-        // Compute peak inline (mirrors CTE logic)
         const active = tables.domains
           .filter((d) => d["paused"] === 0)
           .map((d) => ({ cadence: d["cadence_minutes"] as number, offset: d["phase_offset_minutes"] as number }));
@@ -195,6 +283,76 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
         return { results: [], changes: 1, last_row_id: 0 };
       }
 
+      // INSERT INTO users
+      if (table === "users") {
+        const email = bindings[0] as string;
+        const exists = tables.users.some((u) => u["email"] === email);
+        if (exists) {
+          return { results: [], changes: 0, last_row_id: 0 };
+        }
+        tables.users.push({
+          email,
+          user_id: bindings[1] as string,
+          added_at: bindings[2] as number,
+          last_login_at: null,
+          disabled: 0,
+          role: bindings[3] as string ?? "admin",
+        });
+        return { results: [], changes: 1, last_row_id: 0 };
+      }
+
+      // INSERT INTO sessions
+      if (table === "sessions") {
+        tables.sessions.push({
+          session_id: bindings[0] as string,
+          email: bindings[1] as string,
+          created_at: bindings[2] as number,
+          expires_at: bindings[3] as number,
+          user_agent: bindings[4] as string | null,
+          ip_address: bindings[5] as string | null,
+          auth_method: bindings[6] as string,
+        });
+        return { results: [], changes: 1, last_row_id: 0 };
+      }
+
+      // INSERT INTO login_codes
+      if (table === "login_codes") {
+        tables.login_codes.push({
+          code_hash: bindings[0] as string,
+          email: bindings[1] as string,
+          created_at: bindings[2] as number,
+          expires_at: bindings[3] as number,
+          used_at: null,
+          verify_attempts: 0,
+        });
+        return { results: [], changes: 1, last_row_id: 0 };
+      }
+
+      // INSERT INTO login_attempts
+      if (table === "login_attempts") {
+        tables.login_attempts.push({
+          subject_type: bindings[0] as string,
+          subject_key: bindings[1] as string,
+          ts: bindings[2] as number,
+          event_type: bindings[3] as string,
+        });
+        return { results: [], changes: 1, last_row_id: 0 };
+      }
+
+      // INSERT INTO auth_events
+      if (table === "auth_events") {
+        tables.auth_events.push({
+          ts: bindings[0] as number,
+          email: bindings[1] as string | null,
+          event_type: bindings[2] as string,
+          auth_method: bindings[3] as string | null,
+          ip_address: bindings[4] as string | null,
+          user_agent: bindings[5] as string | null,
+          metadata: bindings[6] as string | null,
+        });
+        return { results: [], changes: 1, last_row_id: 0 };
+      }
+
       return { results: [], changes: 0, last_row_id: 0 };
     }
 
@@ -202,15 +360,57 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
     if (lower.startsWith("update")) {
       if (!table) return { results: [], changes: 0, last_row_id: 0 };
 
+      if (table === "users") {
+        // UPDATE users SET disabled = ? WHERE email = ?
+        if (lower.includes("disabled")) {
+          const disabled = bindings[0] as number;
+          const email = bindings[1] as string;
+          let changed = 0;
+          tables.users.forEach((u) => {
+            if (u["email"] === email) { u["disabled"] = disabled; changed++; }
+          });
+          return { results: [], changes: changed, last_row_id: 0 };
+        }
+        // UPDATE users SET last_login_at = ? WHERE email = ?
+        if (lower.includes("last_login_at")) {
+          const ts = bindings[0] as number;
+          const email = bindings[1] as string;
+          tables.users.forEach((u) => { if (u["email"] === email) u["last_login_at"] = ts; });
+          return { results: [], changes: 1, last_row_id: 0 };
+        }
+        return { results: [], changes: 0, last_row_id: 0 };
+      }
+
+      if (table === "login_codes") {
+        // UPDATE login_codes SET verify_attempts = verify_attempts + 1 WHERE code_hash = ?
+        if (lower.includes("verify_attempts") && !lower.includes("used_at")) {
+          const hash = bindings[0] as string;
+          let changed = 0;
+          tables.login_codes.forEach((c) => {
+            if (c["code_hash"] === hash) { (c["verify_attempts"] as number); c["verify_attempts"] = (c["verify_attempts"] as number) + 1; changed++; }
+          });
+          return { results: [], changes: changed, last_row_id: 0 };
+        }
+        // UPDATE login_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL
+        if (lower.includes("used_at")) {
+          const usedAt = bindings[0] as number;
+          const hash = bindings[1] as string;
+          let changed = 0;
+          tables.login_codes.forEach((c) => {
+            if (c["code_hash"] === hash && c["used_at"] === null) { c["used_at"] = usedAt; changed++; }
+          });
+          return { results: [], changes: changed, last_row_id: 0 };
+        }
+        return { results: [], changes: 0, last_row_id: 0 };
+      }
+
       if (table === "domains") {
-        // UPDATE domains SET last_checked_at = ? WHERE fqdn = ?
         if (lower.includes("last_checked_at")) {
           const val = bindings[0] as number;
           const fqdn = bindings[1] as string;
           tables.domains.forEach((r) => { if (r["fqdn"] === fqdn) r["last_checked_at"] = val; });
           return { results: [], changes: 1, last_row_id: 0 };
         }
-        // UPDATE domains SET cadence_minutes = ?, phase_offset_minutes = ? WHERE fqdn = ?
         if (lower.includes("phase_offset_minutes")) {
           const cadence = bindings[0] as number;
           const offset = bindings[1] as number;
@@ -220,16 +420,13 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
           });
           return { results: [], changes: 1, last_row_id: 0 };
         }
-        // Generic SET ... WHERE fqdn = ?
         const fqdn = bindings[bindings.length - 1] as string;
         const setMatch = /set\s+(.+?)\s+where/.exec(lower);
         if (setMatch) {
           const setParts = setMatch[1]!.split(",").map((s) => s.trim().split(/\s*=\s*/)[0]?.trim());
           tables.domains.forEach((r) => {
             if (r["fqdn"] !== fqdn) return;
-            setParts.forEach((col, i) => {
-              if (col) r[col] = bindings[i] ?? null;
-            });
+            setParts.forEach((col, i) => { if (col) r[col] = bindings[i] ?? null; });
           });
         }
         return { results: [], changes: 1, last_row_id: 0 };
@@ -242,9 +439,7 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
           const setParts = setMatch[1]!.split(",").map((s) => s.trim().split(/\s*=\s*/)[0]?.trim());
           tables.channels.forEach((r) => {
             if (r["id"] !== id) return;
-            setParts.forEach((col, i) => {
-              if (col) r[col] = bindings[i] ?? null;
-            });
+            setParts.forEach((col, i) => { if (col) r[col] = bindings[i] ?? null; });
           });
         }
         return { results: [], changes: 1, last_row_id: 0 };
@@ -256,6 +451,34 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
     // DELETE
     if (lower.startsWith("delete")) {
       if (!table) return { results: [], changes: 0, last_row_id: 0 };
+
+      if (table === "sessions") {
+        // DELETE FROM sessions WHERE session_id = ?
+        if (lower.includes("session_id")) {
+          const id = bindings[0] as string;
+          const before = tables.sessions.length;
+          tables.sessions = tables.sessions.filter((s) => s["session_id"] !== id);
+          return { results: [], changes: before - tables.sessions.length, last_row_id: 0 };
+        }
+        // DELETE FROM sessions WHERE email = ?
+        if (lower.includes("email")) {
+          const email = bindings[0] as string;
+          const before = tables.sessions.length;
+          tables.sessions = tables.sessions.filter((s) => s["email"] !== email);
+          return { results: [], changes: before - tables.sessions.length, last_row_id: 0 };
+        }
+        return { results: [], changes: 0, last_row_id: 0 };
+      }
+
+      if (table === "users") {
+        const email = bindings[0] as string;
+        const before = tables.users.length;
+        tables.users = tables.users.filter((u) => u["email"] !== email);
+        tables.sessions = tables.sessions.filter((s) => s["email"] !== email);
+        tables.login_codes = tables.login_codes.filter((c) => c["email"] !== email);
+        tables.passkeys = tables.passkeys.filter((p) => p["email"] !== email);
+        return { results: [], changes: before - tables.users.length, last_row_id: 0 };
+      }
 
       if (table === "domains") {
         const fqdn = bindings[0] as string;
@@ -291,6 +514,12 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
         return { results: [], changes: before - tables.domain_channels.length, last_row_id: 0 };
       }
 
+      if (table === "login_attempts" || table === "login_codes" || table === "auth_events" || table === "auth_challenges") {
+        // Cron cleanup — just clear all for test purposes
+        tables[table] = [];
+        return { results: [], changes: 1, last_row_id: 0 };
+      }
+
       return { results: [], changes: 0, last_row_id: 0 };
     }
 
@@ -303,7 +532,7 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
       run: async () => {
         const res = executeSQL(sql, bindings);
         return {
-          success: true,
+          success: res.changes >= 0,
           results: res.results,
           meta: { changes: res.changes, last_row_id: res.last_row_id, duration: 0, rows_read: 0, rows_written: 0, size_after: 0, changed_db: false },
         };
@@ -335,11 +564,12 @@ function makeD1(seed?: { [table in TableName]?: Row[] }): D1Database {
       return Promise.all(stmts.map((s) => (s as unknown as { run: () => Promise<unknown> }).run()));
     },
     exec: () => Promise.resolve({ count: 0, duration: 0 }),
+    _tables: tables,
   } as unknown as D1Database;
 }
 
 // ---------------------------------------------------------------------------
-// KV mock (ring buffer only)
+// KV mock
 // ---------------------------------------------------------------------------
 
 function makeKV(): KVNamespace {
@@ -361,6 +591,8 @@ function makeKV(): KVNamespace {
 // Env factory
 // ---------------------------------------------------------------------------
 
+const SENDS: unknown[] = [];
+
 function makeEnv(
   dbSeed?: { [table in "domains" | "channels" | "domain_channels" | "config"]?: Row[] },
   assets?: { fetch: (req: Request) => Promise<Response> },
@@ -370,8 +602,11 @@ function makeEnv(
     EVENTS: makeKV(),
     BOOTSTRAP: makeKV(),
     ADMIN_TOKEN: "correct-token",
-    WEBHOOK_HOST_ALLOWLIST_DEFAULT: "*.webhook.office.com,hooks.slack.com,discord.com,discordapp.com",
+    SESSION_SECRET: "test-session-secret-placeholder-for-unit-tests",
+    WEBHOOK_HOST_ALLOWLIST: "*.webhook.office.com,hooks.slack.com,discord.com,discordapp.com",
     VERSION: "0.1.0-test",
+    ALERT_FROM_ADDRESS: "no-reply@example.com",
+    EMAIL: { send: async (msg: unknown) => { SENDS.push(msg); } },
     ASSETS: assets,
   };
 }
@@ -387,48 +622,66 @@ function noAuthReq(path: string, opts?: RequestInit): Request {
   return new Request(`https://example.workers.dev${path}`, opts);
 }
 
-const NOOP_CTX = {} as ExecutionContext;
+const NOOP_CTX: ExecutionContext = {
+  waitUntil: () => {},
+  passThroughOnException: () => {},
+} as unknown as ExecutionContext;
+
+// Helper: seed a user and mint a valid session cookie
+async function mintSessionCookie(env: Env, email: string): Promise<string> {
+  const db = env.DB;
+  const now = Math.floor(Date.now() / 1000);
+  // seed user
+  await db.prepare(
+    "INSERT INTO users (email, user_id, added_at, last_login_at, disabled, role) VALUES (?, ?, ?, NULL, 0, ?)",
+  ).bind(email, crypto.randomUUID(), now, "admin").run();
+  // create session
+  const session = await createSession(env, db, { email, authMethod: "email-code" });
+  return session.cookieValue;
+}
+
+function sessionReq(path: string, cookieValue: string, opts?: RequestInit): Request {
+  return new Request(`https://example.workers.dev${path}`, {
+    ...opts,
+    headers: {
+      "content-type": "application/json",
+      "cookie": `dropwatch_session=${cookieValue}`,
+      ...(opts?.headers ?? {}),
+    },
+  });
+}
 
 // ---------------------------------------------------------------------------
-// Tests
+// Tests — existing resolveAdminToken / auth middleware
 // ---------------------------------------------------------------------------
 
 describe("resolveAdminToken — null cases", () => {
-  it("returns 401 (token resolves to null) when ADMIN_TOKEN is undefined", async () => {
+  it("returns 401 when ADMIN_TOKEN is undefined", async () => {
     const env = makeEnv();
     env.ADMIN_TOKEN = undefined;
     const res = await handleAdmin(
-      new Request("https://example.workers.dev/domains", {
-        headers: { Authorization: "Bearer anything" },
-      }),
-      env,
-      NOOP_CTX,
+      new Request("https://example.workers.dev/domains", { headers: { Authorization: "Bearer anything" } }),
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(401);
   });
 
-  it("returns 401 (token resolves to null) when ADMIN_TOKEN is empty string", async () => {
+  it("returns 401 when ADMIN_TOKEN is empty string", async () => {
     const env = makeEnv();
     env.ADMIN_TOKEN = "";
     const res = await handleAdmin(
-      new Request("https://example.workers.dev/domains", {
-        headers: { Authorization: "Bearer anything" },
-      }),
-      env,
-      NOOP_CTX,
+      new Request("https://example.workers.dev/domains", { headers: { Authorization: "Bearer anything" } }),
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(401);
   });
 
-  it("returns 401 (token resolves to null) when ADMIN_TOKEN is only whitespace", async () => {
+  it("returns 401 when ADMIN_TOKEN is only whitespace", async () => {
     const env = makeEnv();
     env.ADMIN_TOKEN = "   ";
     const res = await handleAdmin(
-      new Request("https://example.workers.dev/domains", {
-        headers: { Authorization: "Bearer    " },
-      }),
-      env,
-      NOOP_CTX,
+      new Request("https://example.workers.dev/domains", { headers: { Authorization: "Bearer    " } }),
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(401);
   });
@@ -445,7 +698,7 @@ describe("/health — unauthenticated", () => {
   });
 });
 
-describe("auth middleware", () => {
+describe("auth middleware — bearer path", () => {
   it("returns 401 when Authorization header is absent", async () => {
     const env = makeEnv();
     const res = await handleAdmin(noAuthReq("/domains"), env, NOOP_CTX);
@@ -457,11 +710,8 @@ describe("auth middleware", () => {
   it("returns 401 when token is wrong", async () => {
     const env = makeEnv();
     const res = await handleAdmin(
-      new Request("https://example.workers.dev/domains", {
-        headers: { "Authorization": "Bearer wrong-token" },
-      }),
-      env,
-      NOOP_CTX,
+      new Request("https://example.workers.dev/domains", { headers: { "Authorization": "Bearer wrong-token" } }),
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(401);
   });
@@ -469,15 +719,57 @@ describe("auth middleware", () => {
   it("returns 401 for wrong token on non-domain route", async () => {
     const env = makeEnv();
     const res = await handleAdmin(
-      new Request("https://example.workers.dev/budget", {
-        headers: { "Authorization": "Bearer bad" },
-      }),
-      env,
-      NOOP_CTX,
+      new Request("https://example.workers.dev/budget", { headers: { "Authorization": "Bearer bad" } }),
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(401);
   });
 });
+
+describe("auth middleware — session cookie path", () => {
+  it("allows access via valid session cookie", async () => {
+    const env = makeEnv();
+    const cookieValue = await mintSessionCookie(env, "user@example.com");
+    const res = await handleAdmin(
+      sessionReq("/domains", cookieValue),
+      env, NOOP_CTX,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("returns 401 for tampered session cookie", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(
+      sessionReq("/domains", "bad-session-value.tampered"),
+      env, NOOP_CTX,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 for expired session cookie", async () => {
+    const env = makeEnv();
+    // Insert an expired session directly
+    const db = env.DB;
+    const now = Math.floor(Date.now() / 1000);
+    await db.prepare(
+      "INSERT INTO users (email, user_id, added_at, last_login_at, disabled, role) VALUES (?, ?, ?, NULL, 0, 'admin')",
+    ).bind("expired@example.com", crypto.randomUUID(), now).run();
+    // Create session then manually expire it — use a real cookie then modify the table
+    const session = await createSession(env, db, { email: "expired@example.com", authMethod: "email-code" });
+    // Expire it by patching the table directly via raw insert replacement
+    const tables = (db as unknown as { _tables: { sessions: Row[] } })._tables;
+    if (tables) {
+      const s = tables.sessions.find((r) => r["session_id"] === session.sessionId);
+      if (s) s["expires_at"] = now - 1;
+    }
+    const res = await handleAdmin(sessionReq("/domains", session.cookieValue), env, NOOP_CTX);
+    expect(res.status).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /domains, POST /domains, etc — existing tests (bearer path still works)
+// ---------------------------------------------------------------------------
 
 describe("GET /domains", () => {
   it("returns 200 + empty array initially", async () => {
@@ -510,12 +802,8 @@ describe("POST /domains — valid", () => {
   it("returns 201 + domain with phase_offset_minutes populated", async () => {
     const env = makeEnv();
     const res = await handleAdmin(
-      authReq("/domains", {
-        method: "POST",
-        body: JSON.stringify({ fqdn: "test-drop.com", cadenceMinutes: 5, notifyOn: ["available"] }),
-      }),
-      env,
-      NOOP_CTX,
+      authReq("/domains", { method: "POST", body: JSON.stringify({ fqdn: "test-drop.com", cadenceMinutes: 5, notifyOn: ["available"] }) }),
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(201);
     const body = await res.json() as { fqdn: string; phase_offset_minutes: number };
@@ -526,12 +814,8 @@ describe("POST /domains — valid", () => {
   it("lowercases fqdn before storing", async () => {
     const env = makeEnv();
     const res = await handleAdmin(
-      authReq("/domains", {
-        method: "POST",
-        body: JSON.stringify({ fqdn: "UPPER.COM" }),
-      }),
-      env,
-      NOOP_CTX,
+      authReq("/domains", { method: "POST", body: JSON.stringify({ fqdn: "UPPER.COM" }) }),
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(201);
     const body = await res.json() as { fqdn: string };
@@ -544,8 +828,7 @@ describe("POST /domains — validation", () => {
     const env = makeEnv();
     const res = await handleAdmin(
       authReq("/domains", { method: "POST", body: JSON.stringify({ cadenceMinutes: 5 }) }),
-      env,
-      NOOP_CTX,
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(400);
     const body = await res.json() as { error: string };
@@ -556,8 +839,7 @@ describe("POST /domains — validation", () => {
     const env = makeEnv();
     const res = await handleAdmin(
       authReq("/domains", { method: "POST", body: JSON.stringify({ fqdn: "not a domain!" }) }),
-      env,
-      NOOP_CTX,
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(400);
   });
@@ -566,8 +848,7 @@ describe("POST /domains — validation", () => {
     const env = makeEnv();
     const res = await handleAdmin(
       authReq("/domains", { method: "POST", body: JSON.stringify({ fqdn: "test.com", cadenceMinutes: 9999 }) }),
-      env,
-      NOOP_CTX,
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(400);
   });
@@ -577,29 +858,15 @@ describe("POST /domains — over budget", () => {
   it("returns 400 with error:'budget_exceeded' when 45 1-min domains already exist", async () => {
     const existingDomains = Array.from({ length: 45 }, (_, i) => ({
       fqdn: `domain-${i}.com`,
-      added_at: 1,
-      cadence_minutes: 1,
-      phase_offset_minutes: 0,
-      next_due_at: 1,
-      paused: 0,
-      notify_on: '["available"]',
-      label: null,
-      tld_supported: 1,
-      last_status: null,
-      last_status_changed_at: null,
-      last_checked_at: null,
-      pending_confirm_status: null,
-      pending_confirm_count: 0,
+      added_at: 1, cadence_minutes: 1, phase_offset_minutes: 0, next_due_at: 1, paused: 0,
+      notify_on: '["available"]', label: null, tld_supported: 1,
+      last_status: null, last_status_changed_at: null, last_checked_at: null,
+      pending_confirm_status: null, pending_confirm_count: 0,
     }));
     const env = makeEnv({ domains: existingDomains });
-
     const res = await handleAdmin(
-      authReq("/domains", {
-        method: "POST",
-        body: JSON.stringify({ fqdn: "newdomain.com", cadenceMinutes: 1 }),
-      }),
-      env,
-      NOOP_CTX,
+      authReq("/domains", { method: "POST", body: JSON.stringify({ fqdn: "newdomain.com", cadenceMinutes: 1 }) }),
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(400);
     const body = await res.json() as { error: string };
@@ -613,17 +880,9 @@ describe("POST /domains/bulk", () => {
     const res = await handleAdmin(
       authReq("/domains/bulk", {
         method: "POST",
-        body: JSON.stringify({
-          dryRun: true,
-          domains: [
-            { fqdn: "valid.com" },
-            { fqdn: "also-valid.com" },
-            { fqdn: "!invalid" },
-          ],
-        }),
+        body: JSON.stringify({ dryRun: true, domains: [{ fqdn: "valid.com" }, { fqdn: "also-valid.com" }, { fqdn: "!invalid" }] }),
       }),
-      env,
-      NOOP_CTX,
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(200);
     const body = await res.json() as { accepted: unknown[]; rejected: unknown[]; dryRun: boolean };
@@ -631,7 +890,6 @@ describe("POST /domains/bulk", () => {
     expect(body.accepted.length).toBe(2);
     expect(body.rejected.length).toBe(1);
 
-    // verify nothing was persisted
     const listRes = await handleAdmin(authReq("/domains"), env, NOOP_CTX);
     const list = await listRes.json() as unknown[];
     expect(list.length).toBe(0);
@@ -640,14 +898,8 @@ describe("POST /domains/bulk", () => {
   it("without dryRun persists valid domains", async () => {
     const env = makeEnv();
     const res = await handleAdmin(
-      authReq("/domains/bulk", {
-        method: "POST",
-        body: JSON.stringify({
-          domains: [{ fqdn: "a.com" }, { fqdn: "b.com" }],
-        }),
-      }),
-      env,
-      NOOP_CTX,
+      authReq("/domains/bulk", { method: "POST", body: JSON.stringify({ domains: [{ fqdn: "a.com" }, { fqdn: "b.com" }] }) }),
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(200);
     const body = await res.json() as { accepted: unknown[] };
@@ -672,14 +924,9 @@ describe("POST /channels — webhook allowed", () => {
     const res = await handleAdmin(
       authReq("/channels", {
         method: "POST",
-        body: JSON.stringify({
-          type: "webhook-teams",
-          target: "https://myorg.webhook.office.com/webhookb2/test",
-          label: "Teams alerts",
-        }),
+        body: JSON.stringify({ type: "webhook-teams", target: "https://myorg.webhook.office.com/webhookb2/test", label: "Teams alerts" }),
       }),
-      env,
-      NOOP_CTX,
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(201);
     const body = await res.json() as { id: string; type: string };
@@ -694,14 +941,9 @@ describe("POST /channels — webhook disallowed", () => {
     const res = await handleAdmin(
       authReq("/channels", {
         method: "POST",
-        body: JSON.stringify({
-          type: "webhook-generic",
-          target: "https://evil.notallowed.example.com/hook",
-          label: "Bad webhook",
-        }),
+        body: JSON.stringify({ type: "webhook-generic", target: "https://evil.notallowed.example.com/hook", label: "Bad webhook" }),
       }),
-      env,
-      NOOP_CTX,
+      env, NOOP_CTX,
     );
     expect(res.status).toBe(400);
     const body = await res.json() as { error: string };
@@ -713,19 +955,10 @@ describe("DELETE /channels/:id — channel in use", () => {
   it("returns 409 channel_in_use when domain references it without force", async () => {
     const channelId = "ch-abc-123";
     const env = makeEnv({
-      channels: [{
-        id: channelId, type: "webhook-teams",
-        target: "https://myorg.webhook.office.com/test", label: null, disabled: 0,
-        last_delivery_result: null, last_delivery_at: null,
-      }],
+      channels: [{ id: channelId, type: "webhook-teams", target: "https://myorg.webhook.office.com/test", label: null, disabled: 0, last_delivery_result: null, last_delivery_at: null }],
       domain_channels: [{ fqdn: "test.com", channel_id: channelId }],
     });
-
-    const res = await handleAdmin(
-      authReq(`/channels/${channelId}`, { method: "DELETE" }),
-      env,
-      NOOP_CTX,
-    );
+    const res = await handleAdmin(authReq(`/channels/${channelId}`, { method: "DELETE" }), env, NOOP_CTX);
     expect(res.status).toBe(409);
     const body = await res.json() as { error: string; domains: string[] };
     expect(body.error).toBe("channel_in_use");
@@ -735,19 +968,10 @@ describe("DELETE /channels/:id — channel in use", () => {
   it("deletes with ?force=true even when referenced", async () => {
     const channelId = "ch-force-del";
     const env = makeEnv({
-      channels: [{
-        id: channelId, type: "webhook-slack",
-        target: "https://hooks.slack.com/services/T/B/x", label: null, disabled: 0,
-        last_delivery_result: null, last_delivery_at: null,
-      }],
+      channels: [{ id: channelId, type: "webhook-slack", target: "https://hooks.slack.com/services/T/B/x", label: null, disabled: 0, last_delivery_result: null, last_delivery_at: null }],
       domain_channels: [{ fqdn: "test.com", channel_id: channelId }],
     });
-
-    const res = await handleAdmin(
-      authReq(`/channels/${channelId}?force=true`, { method: "DELETE" }),
-      env,
-      NOOP_CTX,
-    );
+    const res = await handleAdmin(authReq(`/channels/${channelId}?force=true`, { method: "DELETE" }), env, NOOP_CTX);
     expect(res.status).toBe(200);
     const body = await res.json() as { deleted: boolean };
     expect(body.deleted).toBe(true);
@@ -759,13 +983,7 @@ describe("GET /budget", () => {
     const env = makeEnv();
     const res = await handleAdmin(authReq("/budget"), env, NOOP_CTX);
     expect(res.status).toBe(200);
-    const body = await res.json() as {
-      peakDuePerMinute: number;
-      checksPerDay: number;
-      withinFreeTier: boolean;
-      warnings: unknown[];
-      headroom: number;
-    };
+    const body = await res.json() as { peakDuePerMinute: number; checksPerDay: number; withinFreeTier: boolean; warnings: unknown[]; headroom: number };
     expect(typeof body.peakDuePerMinute).toBe("number");
     expect(typeof body.checksPerDay).toBe("number");
     expect(typeof body.withinFreeTier).toBe("boolean");
@@ -796,10 +1014,7 @@ describe("GET /", () => {
   it("delegates to ASSETS binding and returns 200 text/html when ASSETS is present", async () => {
     const mockAssets = {
       fetch: async (_req: Request) =>
-        new Response("<html><body>dashboard</body></html>", {
-          status: 200,
-          headers: { "content-type": "text/html; charset=utf-8" },
-        }),
+        new Response("<html><body>dashboard</body></html>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }),
     };
     const env = makeEnv(undefined, mockAssets);
     const res = await handleAdmin(noAuthReq("/"), env, NOOP_CTX);
@@ -833,5 +1048,481 @@ describe("security headers", () => {
     const env = makeEnv();
     const res = await handleAdmin(noAuthReq("/"), env, NOOP_CTX);
     expect(res.headers.get("Content-Security-Policy")).toContain("default-src");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /login
+// ---------------------------------------------------------------------------
+
+describe("GET /login", () => {
+  it("returns 200 HTML with login form", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(noAuthReq("/login"), env, NOOP_CTX);
+    expect(res.status).toBe(200);
+    const ct = res.headers.get("content-type") ?? "";
+    expect(ct).toContain("text/html");
+    const body = await res.text();
+    expect(body).toContain("email-form");
+    expect(body).toContain("passkey-section");
+  });
+
+  it("shows empty-allowlist banner when no users exist", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(noAuthReq("/login"), env, NOOP_CTX);
+    const body = await res.text();
+    expect(body).toContain("No users configured yet");
+  });
+
+  it("does not show banner when users exist", async () => {
+    const env = makeEnv();
+    await mintSessionCookie(env, "alice@example.com");
+    const res = await handleAdmin(noAuthReq("/login"), env, NOOP_CTX);
+    const body = await res.text();
+    expect(body).not.toContain("No users configured yet");
+  });
+
+  it("has X-Frame-Options: DENY", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(noAuthReq("/login"), env, NOOP_CTX);
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+  });
+
+  it("CSP includes frame-ancestors 'none'", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(noAuthReq("/login"), env, NOOP_CTX);
+    const csp = res.headers.get("Content-Security-Policy") ?? "";
+    expect(csp).toContain("frame-ancestors 'none'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /login/email-code
+// ---------------------------------------------------------------------------
+
+describe("POST /login/email-code — allowlisted email", () => {
+  it("returns 202, inserts login_codes row, queues EMAIL.send", async () => {
+    const env = makeEnv();
+    const sends: unknown[] = [];
+    env.EMAIL = { send: async (msg: unknown) => { sends.push(msg); } };
+
+    await mintSessionCookie(env, "alice@example.com");
+
+    const captures: Promise<unknown>[] = [];
+    const ctx: ExecutionContext = { waitUntil: (p: Promise<unknown>) => captures.push(p), passThroughOnException: () => {} } as unknown as ExecutionContext;
+
+    const res = await handleAdmin(
+      new Request("https://example.workers.dev/login/email-code", {
+        method: "POST",
+        headers: { "content-type": "application/json", "CF-Connecting-IP": "1.2.3.4" },
+        body: JSON.stringify({ email: "alice@example.com" }),
+      }),
+      env, ctx,
+    );
+
+    expect(res.status).toBe(202);
+    const body = await res.json() as { ok: boolean; message: string };
+    expect(body.ok).toBe(true);
+    expect(body.message).toContain("on its way");
+
+    // Flush all waitUntil promises
+    await Promise.all(captures);
+
+    const db = env.DB as unknown as { _tables: { login_codes: Row[]; login_attempts: Row[] } };
+    expect(db._tables.login_codes.length).toBe(1);
+    expect(sends.length).toBe(1);
+    const msg = sends[0] as { subject: string; text: string };
+    expect(msg.subject).toContain("domain-drop-watcher sign-in code:");
+    expect(msg.text).not.toMatch(/https?:\/\//);
+  });
+});
+
+describe("POST /login/email-code — non-allowlisted email", () => {
+  it("returns 202, no login_codes row, no email send, auth_events login_fail", async () => {
+    const env = makeEnv();
+    const sends: unknown[] = [];
+    env.EMAIL = { send: async (msg: unknown) => { sends.push(msg); } };
+
+    const captures: Promise<unknown>[] = [];
+    const ctx: ExecutionContext = { waitUntil: (p: Promise<unknown>) => captures.push(p), passThroughOnException: () => {} } as unknown as ExecutionContext;
+
+    const res = await handleAdmin(
+      new Request("https://example.workers.dev/login/email-code", {
+        method: "POST",
+        headers: { "content-type": "application/json", "CF-Connecting-IP": "1.2.3.4" },
+        body: JSON.stringify({ email: "unknown@example.com" }),
+      }),
+      env, ctx,
+    );
+
+    expect(res.status).toBe(202);
+    await Promise.all(captures);
+
+    const db = env.DB as unknown as { _tables: { login_codes: Row[]; auth_events: Row[] } };
+    expect(db._tables.login_codes.length).toBe(0);
+    expect(sends.length).toBe(0);
+
+    const failEvent = db._tables.auth_events.find((e) => e["event_type"] === "login_fail");
+    expect(failEvent).toBeDefined();
+    const meta = JSON.parse(failEvent?.["metadata"] as string ?? "{}") as { reason: string };
+    expect(meta.reason).toBe("unknown_email");
+  });
+});
+
+describe("POST /login/email-code — rate limited", () => {
+  it("returns 429 with Retry-After, no login_codes row inserted", async () => {
+    const env = makeEnv();
+    await mintSessionCookie(env, "alice@example.com");
+
+    // Seed 3 existing attempts to hit burst cap
+    const db = env.DB as unknown as { _tables: { login_attempts: Row[] } };
+    const now = Math.floor(Date.now() / 1000);
+    for (let i = 0; i < 3; i++) {
+      db._tables.login_attempts.push({ subject_type: "email", subject_key: "alice@example.com", ts: now - 10, event_type: "code_sent" });
+    }
+
+    const res = await handleAdmin(
+      new Request("https://example.workers.dev/login/email-code", {
+        method: "POST",
+        headers: { "content-type": "application/json", "CF-Connecting-IP": "1.2.3.4" },
+        body: JSON.stringify({ email: "alice@example.com" }),
+      }),
+      env, NOOP_CTX,
+    );
+
+    expect(res.status).toBe(429);
+    const retryAfter = res.headers.get("Retry-After");
+    expect(retryAfter).toBeDefined();
+    expect(Number(retryAfter)).toBeGreaterThan(0);
+
+    const codeRow = (env.DB as unknown as { _tables: { login_codes: Row[] } })._tables.login_codes;
+    expect(codeRow.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /login/verify-code
+// ---------------------------------------------------------------------------
+
+describe("POST /login/verify-code — missing Origin header", () => {
+  it("returns 403 when Origin header is absent", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(
+      new Request("https://example.workers.dev/login/verify-code", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "alice@example.com", code: "123456" }),
+      }),
+      env, NOOP_CTX,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 403 when Origin header does not match worker origin", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(
+      new Request("https://example.workers.dev/login/verify-code", {
+        method: "POST",
+        headers: { "content-type": "application/json", "Origin": "https://evil.example.com" },
+        body: JSON.stringify({ email: "alice@example.com", code: "123456" }),
+      }),
+      env, NOOP_CTX,
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("POST /login/verify-code — wrong code", () => {
+  it("returns 401 on code mismatch, logs code_verify_fail", async () => {
+    const env = makeEnv();
+
+    const captures: Promise<unknown>[] = [];
+    const ctx: ExecutionContext = { waitUntil: (p: Promise<unknown>) => captures.push(p), passThroughOnException: () => {} } as unknown as ExecutionContext;
+
+    const res = await handleAdmin(
+      new Request("https://example.workers.dev/login/verify-code", {
+        method: "POST",
+        headers: { "content-type": "application/json", "Origin": "https://example.workers.dev", "CF-Connecting-IP": "1.2.3.4" },
+        body: JSON.stringify({ email: "alice@example.com", code: "999999" }),
+      }),
+      env, ctx,
+    );
+
+    await Promise.all(captures);
+    expect(res.status).toBe(401);
+    const db = env.DB as unknown as { _tables: { login_attempts: Row[] } };
+    const failAttempt = db._tables.login_attempts.find((a) => a["event_type"] === "code_verify_fail");
+    expect(failAttempt).toBeDefined();
+  });
+});
+
+describe("POST /login/verify-code — happy path", () => {
+  it("sets cookie, creates session row, logs login_ok", async () => {
+    const env = makeEnv();
+
+    // Seed user + a valid login code
+    const now = Math.floor(Date.now() / 1000);
+    const db = env.DB;
+    await db.prepare(
+      "INSERT INTO users (email, user_id, added_at, last_login_at, disabled, role) VALUES (?, ?, ?, NULL, 0, 'admin')",
+    ).bind("bob@example.com", crypto.randomUUID(), now).run();
+
+    const { hashLoginCode } = await import("../src/auth/magic-link.js");
+    const code = "042042";
+    const hash = await hashLoginCode(env, "bob@example.com", code);
+    const tables = (db as unknown as { _tables: { login_codes: Row[] } })._tables;
+    tables.login_codes.push({ code_hash: hash, email: "bob@example.com", created_at: now - 30, expires_at: now + 570, used_at: null, verify_attempts: 0 });
+
+    const captures: Promise<unknown>[] = [];
+    const ctx: ExecutionContext = { waitUntil: (p: Promise<unknown>) => captures.push(p), passThroughOnException: () => {} } as unknown as ExecutionContext;
+
+    const res = await handleAdmin(
+      new Request("https://example.workers.dev/login/verify-code", {
+        method: "POST",
+        headers: { "content-type": "application/json", "Origin": "https://example.workers.dev", "CF-Connecting-IP": "1.2.3.4" },
+        body: JSON.stringify({ email: "bob@example.com", code }),
+      }),
+      env, ctx,
+    );
+
+    await Promise.all(captures);
+    expect(res.status).toBe(200);
+
+    const cookie = res.headers.get("Set-Cookie") ?? "";
+    expect(cookie).toContain("dropwatch_session=");
+    expect(cookie).toContain("HttpOnly");
+
+    const body = await res.json() as { ok: boolean; redirect: string };
+    expect(body.ok).toBe(true);
+    expect(body.redirect).toBe("/");
+
+    const sessions = (env.DB as unknown as { _tables: { sessions: Row[]; auth_events: Row[] } })._tables;
+    expect(sessions.sessions.length).toBe(1);
+    const loginOk = sessions.auth_events.find((e) => e["event_type"] === "login_ok");
+    expect(loginOk).toBeDefined();
+    expect(loginOk?.["auth_method"]).toBe("email-code");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /logout
+// ---------------------------------------------------------------------------
+
+describe("POST /logout", () => {
+  it("revokes session and clears cookie", async () => {
+    const env = makeEnv();
+    const cookieValue = await mintSessionCookie(env, "alice@example.com");
+
+    const res = await handleAdmin(
+      sessionReq("/logout", cookieValue, { method: "POST" }),
+      env, NOOP_CTX,
+    );
+
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get("Set-Cookie") ?? "";
+    expect(setCookie).toContain("Max-Age=0");
+
+    // Session should be gone
+    const tables = (env.DB as unknown as { _tables: { sessions: Row[] } })._tables;
+    expect(tables.sessions.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /users CRUD
+// ---------------------------------------------------------------------------
+
+describe("/users CRUD", () => {
+  it("GET /users returns user list with activeSessions count", async () => {
+    const env = makeEnv();
+    const cookieValue = await mintSessionCookie(env, "admin@example.com");
+
+    const res = await handleAdmin(sessionReq("/users", cookieValue), env, NOOP_CTX);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Array<{ email: string; activeSessions: number }>;
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBe(1);
+    expect(body[0]?.email).toBe("admin@example.com");
+    expect(typeof body[0]?.activeSessions).toBe("number");
+  });
+
+  it("POST /users adds a new user and returns 201", async () => {
+    const env = makeEnv();
+    const cookieValue = await mintSessionCookie(env, "admin@example.com");
+
+    const captures: Promise<unknown>[] = [];
+    const ctx: ExecutionContext = { waitUntil: (p: Promise<unknown>) => captures.push(p), passThroughOnException: () => {} } as unknown as ExecutionContext;
+
+    const res = await handleAdmin(
+      sessionReq("/users", cookieValue, { method: "POST", body: JSON.stringify({ email: "newuser@example.com" }) }),
+      env, ctx,
+    );
+    await Promise.all(captures);
+
+    expect(res.status).toBe(201);
+    const body = await res.json() as { email: string };
+    expect(body.email).toBe("newuser@example.com");
+
+    const events = (env.DB as unknown as { _tables: { auth_events: Row[] } })._tables.auth_events;
+    const addedEvent = events.find((e) => e["event_type"] === "user_added");
+    expect(addedEvent).toBeDefined();
+    const meta = JSON.parse(addedEvent?.["metadata"] as string ?? "{}") as { actor: string };
+    expect(meta.actor).toBe("admin@example.com");
+  });
+
+  it("POST /users returns 409 for duplicate email", async () => {
+    const env = makeEnv();
+    const cookieValue = await mintSessionCookie(env, "admin@example.com");
+
+    const res1 = await handleAdmin(
+      sessionReq("/users", cookieValue, { method: "POST", body: JSON.stringify({ email: "dup@example.com" }) }),
+      env, NOOP_CTX,
+    );
+    expect(res1.status).toBe(201);
+
+    const res2 = await handleAdmin(
+      sessionReq("/users", cookieValue, { method: "POST", body: JSON.stringify({ email: "dup@example.com" }) }),
+      env, NOOP_CTX,
+    );
+    expect(res2.status).toBe(409);
+    const body = await res2.json() as { error: string };
+    expect(body.error).toBe("user_exists");
+  });
+
+  it("POST /users returns 400 for malformed email", async () => {
+    const env = makeEnv();
+    const cookieValue = await mintSessionCookie(env, "admin@example.com");
+    const res = await handleAdmin(
+      sessionReq("/users", cookieValue, { method: "POST", body: JSON.stringify({ email: "notanemail" }) }),
+      env, NOOP_CTX,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("DELETE /users/:email removes user and returns {deleted:true}", async () => {
+    const env = makeEnv();
+    const cookieValue = await mintSessionCookie(env, "admin@example.com");
+
+    await handleAdmin(
+      sessionReq("/users", cookieValue, { method: "POST", body: JSON.stringify({ email: "todelete@example.com" }) }),
+      env, NOOP_CTX,
+    );
+
+    const captures: Promise<unknown>[] = [];
+    const ctx: ExecutionContext = { waitUntil: (p: Promise<unknown>) => captures.push(p), passThroughOnException: () => {} } as unknown as ExecutionContext;
+
+    const res = await handleAdmin(
+      sessionReq("/users/todelete@example.com", cookieValue, { method: "DELETE" }),
+      env, ctx,
+    );
+    await Promise.all(captures);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { deleted: boolean };
+    expect(body.deleted).toBe(true);
+
+    const events = (env.DB as unknown as { _tables: { auth_events: Row[] } })._tables.auth_events;
+    expect(events.find((e) => e["event_type"] === "user_removed")).toBeDefined();
+  });
+
+  it("POST /users/:email/disable disables user", async () => {
+    const env = makeEnv();
+    const cookieValue = await mintSessionCookie(env, "admin@example.com");
+
+    await handleAdmin(
+      sessionReq("/users", cookieValue, { method: "POST", body: JSON.stringify({ email: "victim@example.com" }) }),
+      env, NOOP_CTX,
+    );
+
+    const res = await handleAdmin(
+      sessionReq("/users/victim@example.com/disable", cookieValue, { method: "POST" }),
+      env, NOOP_CTX,
+    );
+    expect(res.status).toBe(200);
+
+    const users = (env.DB as unknown as { _tables: { users: Row[] } })._tables.users;
+    const victim = users.find((u) => u["email"] === "victim@example.com");
+    expect(victim?.["disabled"]).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /sessions revoke-all
+// ---------------------------------------------------------------------------
+
+describe("POST /sessions/revoke-all", () => {
+  it("deletes all sessions for current user and clears cookie", async () => {
+    const env = makeEnv();
+    const cookieValue = await mintSessionCookie(env, "alice@example.com");
+    // Mint a second session for the same user
+    await createSession(env, env.DB, { email: "alice@example.com", authMethod: "email-code" });
+
+    const tables = (env.DB as unknown as { _tables: { sessions: Row[] } })._tables;
+    expect(tables.sessions.length).toBe(2);
+
+    const res = await handleAdmin(
+      sessionReq("/sessions/revoke-all", cookieValue, { method: "POST" }),
+      env, NOOP_CTX,
+    );
+
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get("Set-Cookie") ?? "";
+    expect(setCookie).toContain("Max-Age=0");
+    expect(tables.sessions.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /auth/health (bearer-only)
+// ---------------------------------------------------------------------------
+
+describe("GET /auth/health", () => {
+  it("returns health info when authenticated via bearer", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(authReq("/auth/health"), env, NOOP_CTX);
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      email_routing_bound: boolean;
+      alert_from_set: boolean;
+      session_secret_set: boolean;
+      admin_token_set: boolean;
+      allowlist_size: number;
+      rp_id: unknown;
+      webauthn_available: boolean;
+    };
+    expect(typeof body.email_routing_bound).toBe("boolean");
+    expect(typeof body.admin_token_set).toBe("boolean");
+    expect(body.webauthn_available).toBe(true);
+    expect(typeof body.allowlist_size).toBe("number");
+  });
+
+  it("returns 403 when authenticated via session (not bearer)", async () => {
+    const env = makeEnv();
+    const cookieValue = await mintSessionCookie(env, "alice@example.com");
+    const res = await handleAdmin(sessionReq("/auth/health", cookieValue), env, NOOP_CTX);
+    expect(res.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /auth/empty-allowlist-status (public endpoint)
+// ---------------------------------------------------------------------------
+
+describe("GET /auth/empty-allowlist-status", () => {
+  it("returns {empty:true} when no users exist", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(noAuthReq("/auth/empty-allowlist-status"), env, NOOP_CTX);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { empty: boolean };
+    expect(body.empty).toBe(true);
+  });
+
+  it("returns {empty:false} when at least one user exists", async () => {
+    const env = makeEnv();
+    await mintSessionCookie(env, "alice@example.com");
+    const res = await handleAdmin(noAuthReq("/auth/empty-allowlist-status"), env, NOOP_CTX);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { empty: boolean };
+    expect(body.empty).toBe(false);
   });
 });

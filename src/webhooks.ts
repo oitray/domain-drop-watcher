@@ -59,8 +59,8 @@ export function isWebhookAllowed(url: string, allowlist: string[]): AllowlistRes
   return { allowed: false, reason: "not-allowed" };
 }
 
-export function parseAllowlist(csv: string | undefined, fallbackCsv: string): string[] {
-  const source = (csv !== undefined && csv.trim() !== "") ? csv : fallbackCsv;
+export function parseAllowlist(csv: string): string[] {
+  const source = csv ?? "";
   const seen = new Set<string>();
   const result: string[] = [];
   for (const entry of source.split(",")) {

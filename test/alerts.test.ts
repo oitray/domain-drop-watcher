@@ -33,8 +33,8 @@ function makeEnv(overrides?: Partial<Env>): Env {
     EVENTS: {} as never,
     BOOTSTRAP: {} as never,
     ADMIN_TOKEN: "test-token",
-    WEBHOOK_HOST_ALLOWLIST: undefined,
-    WEBHOOK_HOST_ALLOWLIST_DEFAULT:
+    SESSION_SECRET: "test-session-secret-placeholder-for-unit-tests",
+    WEBHOOK_HOST_ALLOWLIST:
       "webhook.office.com,*.webhook.office.com,hooks.slack.com,discord.com",
     ...overrides,
   };

@@ -16,7 +16,7 @@
     --light-gray: #f4f4f4;
     --border: #ddd;
     --white: #fff;
-    --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font: 'Barlow', Helvetica, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   body { font-family: var(--font); color: var(--charcoal); background: var(--light-gray); font-size: 14px; }
   #header {
@@ -31,18 +31,16 @@
   #budget-gauge { flex: 1; font-size: 13px; color: #ccc; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   #budget-gauge .gauge-ok { color: #5eea8d; }
   #budget-gauge .gauge-warn { color: var(--yellow); }
+  #header-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
   #pause-btn { background: none; border: 1px solid #666; color: #ccc; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; white-space: nowrap; }
   #pause-btn:hover { border-color: #aaa; color: var(--white); }
   #pause-btn.paused { border-color: var(--yellow); color: var(--yellow); }
-  #login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 999; }
-  #login-overlay.hidden { display: none; }
-  .login-card { background: var(--white); border-radius: 8px; padding: 32px 28px; width: 340px; box-shadow: 0 8px 32px rgba(0,0,0,.3); }
-  .login-card h2 { color: var(--red); font-size: 20px; margin-bottom: 8px; }
-  .login-card p { color: #666; font-size: 13px; margin-bottom: 20px; }
-  #login-error { color: var(--red); font-size: 13px; margin-top: 10px; min-height: 18px; }
-  #tab-bar { background: var(--white); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 0; }
-  .tab-btn { background: none; border: none; cursor: pointer; padding: 14px 18px; font-size: 14px; font-weight: 500; color: var(--gray); border-bottom: 3px solid transparent; margin-bottom: -1px; transition: color .15s, border-color .15s; }
+  #logout-btn { background: none; border: 1px solid #666; color: #ccc; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+  #logout-btn:hover { border-color: #aaa; color: var(--white); }
+  #tab-bar { background: var(--white); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 0; overflow-x: auto; }
+  .tab-btn { background: none; border: none; cursor: pointer; padding: 14px 18px; font-size: 14px; font-weight: 500; color: var(--gray); border-bottom: 3px solid transparent; margin-bottom: -1px; transition: color .15s, border-color .15s; white-space: nowrap; }
   .tab-btn:hover { color: var(--charcoal); }
+  .tab-btn:focus-visible { outline: 2px solid var(--red); outline-offset: -2px; }
   .tab-btn.active { color: var(--red); border-bottom-color: var(--red); }
   #main { padding: 24px; max-width: 1200px; margin: 0 auto; }
   .tab-panel { display: none; }
@@ -52,12 +50,13 @@
   .card-body { padding: 20px; }
   label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: var(--charcoal); }
   input[type=text], input[type=password], input[type=email], select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px; font-family: var(--font); color: var(--charcoal); background: var(--white); }
-  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--red); }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--red); box-shadow: 0 0 0 2px rgba(228,46,27,.2); }
   textarea { resize: vertical; min-height: 100px; }
   .form-row { margin-bottom: 14px; }
   .form-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
   .form-inline .form-row { margin-bottom: 0; flex: 1; min-width: 160px; }
   .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; font-family: var(--font); white-space: nowrap; }
+  .btn:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
   .btn-primary { background: var(--red); color: var(--white); }
   .btn-primary:hover { background: #c4260f; }
   .btn-secondary { background: var(--white); color: var(--charcoal); border: 1px solid var(--border); }
@@ -112,6 +111,9 @@
   .budget-bar-fill.over { background: var(--red); }
   .budget-bar-label { font-size: 12px; color: var(--gray); white-space: nowrap; }
   code { font-family: monospace; background: #f0f0f0; padding: 2px 5px; border-radius: 3px; font-size: 12px; }
+  .notice-success { background: #e8f8f0; border-left: 4px solid var(--green); }
+  #break-glass-banner { display: none; background: #fff3cd; border-bottom: 1px solid #ffc107; padding: 10px 24px; font-size: 13px; color: #856404; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
   @media (max-width: 600px) {
     #header { padding: 0 12px; }
     #main { padding: 12px; }
@@ -122,36 +124,30 @@
 </head>
 <body>
 
-<div id="login-overlay">
-  <div class="login-card">
-    <h2>Domain Drop Watcher</h2>
-    <p>Enter your admin token to access the dashboard.</p>
-    <div class="form-row">
-      <label for="token-input">Admin Token</label>
-      <input type="password" id="token-input" placeholder="Paste token here" autocomplete="current-password">
-    </div>
-    <button class="btn btn-primary" id="unlock-btn" style="width:100%">Unlock</button>
-    <div id="login-error"></div>
-  </div>
+<div id="break-glass-banner" role="status" aria-live="polite">
+  You are signed in via break-glass. Add users at <strong>Settings &rarr; Users</strong> to enable email/passkey login.
 </div>
 
 <div id="header">
   <h1>Domain Drop Watcher</h1>
   <div id="budget-gauge">Loading budget&hellip;</div>
-  <button class="btn" id="pause-btn" style="display:none">&#9646;&#9646; Pause All</button>
+  <div id="header-actions">
+    <button class="btn" id="pause-btn" style="display:none">&#9646;&#9646; Pause All</button>
+    <button class="btn" id="logout-btn" style="display:none" aria-label="Sign out">Sign out</button>
+  </div>
 </div>
 
-<div id="tab-bar">
-  <button class="tab-btn active" data-tab="domains">Domains</button>
-  <button class="tab-btn" data-tab="bulk">Bulk Add</button>
-  <button class="tab-btn" data-tab="channels">Channels</button>
-  <button class="tab-btn" data-tab="events">Events</button>
-  <button class="tab-btn" data-tab="settings">Settings</button>
+<div id="tab-bar" role="tablist" aria-label="Main navigation">
+  <button class="tab-btn active" data-tab="domains" role="tab" aria-selected="true" aria-controls="tab-domains">Domains</button>
+  <button class="tab-btn" data-tab="bulk" role="tab" aria-selected="false" aria-controls="tab-bulk">Bulk Add</button>
+  <button class="tab-btn" data-tab="channels" role="tab" aria-selected="false" aria-controls="tab-channels">Channels</button>
+  <button class="tab-btn" data-tab="events" role="tab" aria-selected="false" aria-controls="tab-events">Events</button>
+  <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings">Settings</button>
 </div>
 
 <div id="main">
 
-  <div id="tab-domains" class="tab-panel active">
+  <div id="tab-domains" class="tab-panel active" role="tabpanel">
     <div class="card">
       <div class="card-header">
         Monitored Domains
@@ -160,11 +156,11 @@
       <div id="add-domain-form" style="display:none; padding:16px 20px; border-bottom:1px solid var(--border); background:#fafafa;">
         <div class="form-inline">
           <div class="form-row">
-            <label>FQDN</label>
+            <label for="new-fqdn">FQDN</label>
             <input type="text" id="new-fqdn" placeholder="example.com">
           </div>
           <div class="form-row">
-            <label>Cadence</label>
+            <label for="new-cadence">Cadence</label>
             <select id="new-cadence">
               <option value="1">1 min</option>
               <option value="5">5 min</option>
@@ -176,7 +172,7 @@
             </select>
           </div>
           <div class="form-row">
-            <label>Label (optional)</label>
+            <label for="new-label">Label (optional)</label>
             <input type="text" id="new-label" placeholder="My domain">
           </div>
         </div>
@@ -207,7 +203,7 @@
     </div>
   </div>
 
-  <div id="tab-bulk" class="tab-panel">
+  <div id="tab-bulk" class="tab-panel" role="tabpanel">
     <div class="card">
       <div class="card-header">Bulk Add Domains</div>
       <div class="card-body">
@@ -215,7 +211,7 @@
           One domain per line. Optional: <code>fqdn,cadenceMin,label</code>
         </p>
         <div class="form-row">
-          <label>Domains</label>
+          <label for="bulk-input">Domains</label>
           <textarea id="bulk-input" placeholder="example.com&#10;anotherdomain.io,5,Priority domain&#10;dropcandidate.net,15"></textarea>
         </div>
         <div style="display:flex; gap:8px; margin-top:12px;">
@@ -227,7 +223,7 @@
     </div>
   </div>
 
-  <div id="tab-channels" class="tab-panel">
+  <div id="tab-channels" class="tab-panel" role="tabpanel">
     <div class="card">
       <div class="card-header">
         Alert Channels
@@ -236,7 +232,7 @@
       <div id="add-channel-form" style="display:none; padding:16px 20px; border-bottom:1px solid var(--border); background:#fafafa;">
         <div class="form-inline">
           <div class="form-row">
-            <label>Type</label>
+            <label for="ch-type">Type</label>
             <select id="ch-type">
               <option value="email">Email</option>
               <option value="webhook">Webhook (auto-detect)</option>
@@ -247,11 +243,11 @@
             </select>
           </div>
           <div class="form-row">
-            <label>Target (URL or email)</label>
+            <label for="ch-target">Target (URL or email)</label>
             <input type="text" id="ch-target" placeholder="https://... or user@example.com">
           </div>
           <div class="form-row">
-            <label>Label (optional)</label>
+            <label for="ch-label">Label (optional)</label>
             <input type="text" id="ch-label" placeholder="My channel">
           </div>
         </div>
@@ -285,7 +281,7 @@
     </div>
   </div>
 
-  <div id="tab-events" class="tab-panel">
+  <div id="tab-events" class="tab-panel" role="tabpanel">
     <div class="card">
       <div class="card-header">
         Event Log
@@ -303,24 +299,9 @@
     </div>
   </div>
 
-  <div id="tab-settings" class="tab-panel">
-    <div class="card">
-      <div class="card-header">Admin Token</div>
-      <div class="card-body">
-        <div class="notice notice-info" style="margin-bottom:14px">
-          Token rotation is managed via Wrangler CLI. Run: <code>wrangler secret put ADMIN_TOKEN</code>,
-          then enter the new token below to update your browser session.
-        </div>
-        <div class="form-row">
-          <label>Update Session Token</label>
-          <input type="password" id="session-token-input" placeholder="Paste new token">
-        </div>
-        <button class="btn btn-secondary btn-sm" id="update-session-token-btn">Update Session Token</button>
-        <div id="token-update-msg" style="font-size:13px; margin-top:8px;"></div>
-      </div>
-    </div>
+  <div id="tab-settings" class="tab-panel" role="tabpanel">
 
-    <div class="card" id="email-status-card" style="display:none">
+    <div id="email-status-card" class="card" style="display:none">
       <div class="card-header">&#9888;&#65039; Email Configuration Issue</div>
       <div class="card-body">
         <div class="notice notice-warn">
@@ -332,29 +313,150 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-header">Webhook Allowlist</div>
-      <div class="card-body">
-        <p style="font-size:13px; color:var(--gray); margin-bottom:10px">
-          Currently configured webhook hosts. Change via: <code>wrangler secret put WEBHOOK_HOST_ALLOWLIST</code>
-        </p>
-        <div id="allowlist-display" style="font-family:monospace; font-size:13px; line-height:1.8; color:var(--charcoal)">Loading&hellip;</div>
+    <div id="settings-subtabs" style="display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:20px; overflow-x:auto;">
+      <button class="tab-btn active" data-subtab="users" style="border-bottom-color:var(--red)">Users</button>
+      <button class="tab-btn" data-subtab="passkeys">Passkeys</button>
+      <button class="tab-btn" data-subtab="sessions">Sessions</button>
+      <button class="tab-btn" data-subtab="config">Config</button>
+    </div>
+
+    <div id="subtab-users" class="subtab-panel">
+      <div class="card">
+        <div class="card-header">
+          User Allowlist
+          <button class="btn btn-primary btn-sm" id="add-user-toggle" style="margin-left:auto">+ Add User</button>
+        </div>
+        <div id="add-user-form" style="display:none; padding:16px 20px; border-bottom:1px solid var(--border); background:#fafafa;">
+          <div class="form-inline">
+            <div class="form-row">
+              <label for="new-user-email">Email address</label>
+              <input type="email" id="new-user-email" placeholder="user@example.com" autocomplete="off">
+            </div>
+          </div>
+          <div id="add-user-error" class="notice notice-error" style="display:none; margin-top:10px" role="alert"></div>
+          <div style="margin-top:12px; display:flex; gap:8px;">
+            <button class="btn btn-primary btn-sm" id="save-user-btn">Add</button>
+            <button class="btn btn-secondary btn-sm" id="cancel-user-btn">Cancel</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Added</th>
+                <th>Last Login</th>
+                <th>Sessions</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody">
+              <tr><td colspan="6" class="loading">Loading&hellip;</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-header">Budget Summary</div>
-      <div class="card-body" id="settings-budget-body">Loading&hellip;</div>
+    <div id="subtab-passkeys" class="subtab-panel" style="display:none">
+      <div class="card">
+        <div class="card-header">
+          Passkeys
+          <button class="btn btn-primary btn-sm" id="register-passkey-btn" style="margin-left:auto">+ Register Passkey</button>
+        </div>
+        <div id="register-passkey-form" style="display:none; padding:16px 20px; border-bottom:1px solid var(--border); background:#fafafa;">
+          <div class="form-row">
+            <label for="passkey-device-name">Device name (optional)</label>
+            <input type="text" id="passkey-device-name" placeholder="MacBook Touch ID" autocomplete="off" style="max-width:300px">
+          </div>
+          <div id="register-passkey-error" class="notice notice-error" style="display:none; margin-top:8px" role="alert"></div>
+          <div style="margin-top:12px; display:flex; gap:8px;">
+            <button class="btn btn-primary btn-sm" id="register-passkey-start-btn">Register</button>
+            <button class="btn btn-secondary btn-sm" id="cancel-passkey-btn">Cancel</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Device</th>
+                <th>Registered</th>
+                <th>Last Used</th>
+                <th>Transports</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="passkeys-tbody">
+              <tr><td colspan="5" class="loading">Loading&hellip;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
+
+    <div id="subtab-sessions" class="subtab-panel" style="display:none">
+      <div class="card">
+        <div class="card-header">
+          Active Sessions
+          <button class="btn btn-danger btn-sm" id="revoke-all-sessions-btn" style="margin-left:auto">Revoke all my sessions</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Method</th>
+                <th>IP Address</th>
+                <th>User Agent</th>
+                <th>Created</th>
+                <th>Expires</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="sessions-tbody">
+              <tr><td colspan="6" class="loading">Loading&hellip;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="subtab-config" class="subtab-panel" style="display:none">
+      <div class="card">
+        <div class="card-header">Admin Token (Break-glass)</div>
+        <div class="card-body">
+          <div class="notice notice-info" style="margin-bottom:14px">
+            Token rotation is managed via Wrangler CLI. Run: <code>wrangler secret put ADMIN_TOKEN</code>.
+            Keep this set for lockout recovery.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">Webhook Allowlist</div>
+        <div class="card-body">
+          <p style="font-size:13px; color:var(--gray); margin-bottom:10px">
+            Currently configured webhook hosts. Change via: <code>wrangler secret put WEBHOOK_HOST_ALLOWLIST</code>
+          </p>
+          <div id="allowlist-display" style="font-family:monospace; font-size:13px; line-height:1.8; color:var(--charcoal)">Loading&hellip;</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">Budget Summary</div>
+        <div class="card-body" id="settings-budget-body">Loading&hellip;</div>
+      </div>
+    </div>
+
   </div>
 
 </div>
 
-<script>
-var S = { token: null, domains: [], channels: [], paused: false };
+<div aria-live="polite" aria-atomic="true" class="sr-only" id="live-region"></div>
 
-function getToken() { return sessionStorage.getItem("ddw_token") || ""; }
-function setToken(t) { sessionStorage.setItem("ddw_token", t); S.token = t; }
+<script src="/vendor/simplewebauthn-browser.js"></script>
+<script>
+var S = { domains: [], channels: [], paused: false };
 
 function esc(s) {
   return String(s == null ? "" : s)
@@ -371,6 +473,11 @@ function relTime(ts) {
   if (diff < 3600) return Math.floor(diff / 60) + "m ago";
   if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
   return Math.floor(diff / 86400) + "d ago";
+}
+
+function absTime(ts) {
+  if (!ts) return "—";
+  return new Date(ts * 1000).toLocaleString();
 }
 
 function statusChip(status) {
@@ -411,11 +518,16 @@ function parseLines(text) {
   });
 }
 
+function announce(msg) {
+  var el = document.getElementById("live-region");
+  el.textContent = "";
+  setTimeout(function() { el.textContent = msg; }, 50);
+}
+
 async function apiFetch(path, opts) {
   opts = opts || {};
-  var headers = Object.assign({ "Authorization": "Bearer " + getToken(), "Content-Type": "application/json" }, opts.headers || {});
-  var res = await fetch(path, Object.assign({}, opts, { headers: headers }));
-  return res;
+  var headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+  return fetch(path, Object.assign({}, opts, { headers: headers, credentials: "same-origin" }));
 }
 
 async function apiJson(path, opts) {
@@ -425,46 +537,48 @@ async function apiJson(path, opts) {
   return { ok: res.ok, status: res.status, body: body };
 }
 
-/* ---- Login ---- */
-var loginOverlay = document.getElementById("login-overlay");
-var loginError = document.getElementById("login-error");
-var tokenInput = document.getElementById("token-input");
-var unlockBtn = document.getElementById("unlock-btn");
-
-async function tryUnlock(token) {
-  loginError.textContent = "";
-  setToken(token);
+/* ---- Auth check ---- */
+async function checkAuth() {
   var r = await apiJson("/domains");
-  if (r.ok) {
-    loginOverlay.classList.add("hidden");
-    initDashboard();
-  } else if (r.status === 401) {
-    loginError.textContent = "Invalid token. Try again.";
-    sessionStorage.removeItem("ddw_token");
-  } else {
-    loginError.textContent = "Server error " + r.status + ". Check worker logs.";
-    sessionStorage.removeItem("ddw_token");
-  }
+  if (r.status === 401) { location.href = "/login"; return false; }
+  return true;
 }
 
-unlockBtn.addEventListener("click", function() {
-  var t = tokenInput.value.trim();
-  if (!t) { loginError.textContent = "Token required."; return; }
-  tryUnlock(t);
-});
-tokenInput.addEventListener("keydown", function(e) { if (e.key === "Enter") unlockBtn.click(); });
-
-var savedToken = getToken();
-if (savedToken) { tryUnlock(savedToken); }
+/* ---- Break-glass banner ---- */
+function updateBreakGlassBanner(method) {
+  var banner = document.getElementById("break-glass-banner");
+  banner.style.display = (method === "bearer-break-glass") ? "block" : "none";
+}
 
 /* ---- Tabs ---- */
-document.querySelectorAll(".tab-btn").forEach(function(btn) {
+document.querySelectorAll(".tab-btn[data-tab]").forEach(function(btn) {
   btn.addEventListener("click", function() {
     var tab = btn.dataset.tab;
-    document.querySelectorAll(".tab-btn").forEach(function(b) { b.classList.toggle("active", b === btn); });
+    document.querySelectorAll(".tab-btn[data-tab]").forEach(function(b) {
+      b.classList.toggle("active", b === btn);
+      b.setAttribute("aria-selected", b === btn ? "true" : "false");
+    });
     document.querySelectorAll(".tab-panel").forEach(function(p) { p.classList.toggle("active", p.id === "tab-" + tab); });
     if (tab === "events") loadEvents();
-    if (tab === "settings") loadSettings();
+    if (tab === "settings") { loadSettings(); loadUsersTab(); }
+  });
+});
+
+/* ---- Settings subtabs ---- */
+document.querySelectorAll("#settings-subtabs .tab-btn[data-subtab]").forEach(function(btn) {
+  btn.addEventListener("click", function() {
+    var sub = btn.dataset.subtab;
+    document.querySelectorAll("#settings-subtabs .tab-btn").forEach(function(b) {
+      b.classList.toggle("active", b === btn);
+      b.style.borderBottomColor = b === btn ? "var(--red)" : "";
+    });
+    document.querySelectorAll(".subtab-panel").forEach(function(p) {
+      p.style.display = p.id === "subtab-" + sub ? "" : "none";
+    });
+    if (sub === "users") loadUsersTab();
+    if (sub === "passkeys") loadPasskeysTab();
+    if (sub === "sessions") loadSessionsTab();
+    if (sub === "config") loadConfigSubtab();
   });
 });
 
@@ -526,14 +640,14 @@ async function loadDomains() {
     }).join("");
     return "<tr>" +
       "<td><strong>" + esc(d.fqdn) + "</strong>" + (d.label ? "<br><small style=\"color:var(--gray)\">" + esc(d.label) + "</small>" : "") + "</td>" +
-      "<td><select class=\"cadence-select\" data-fqdn=\"" + esc(d.fqdn) + "\" onchange=\"patchCadence(this)\">" + cadOpts + "</select></td>" +
+      "<td><select class=\"cadence-select\" data-fqdn=\"" + esc(d.fqdn) + "\" onchange=\"patchCadence(this)\" aria-label=\"Cadence for " + esc(d.fqdn) + "\">" + cadOpts + "</select></td>" +
       "<td>" + statusChip(d.last_status) + "</td>" +
       "<td style=\"color:var(--gray);font-size:13px\">" + relTime(d.last_checked_at) + "</td>" +
-      "<td><label class=\"toggle\"><input type=\"checkbox\"" + (d.paused ? " checked" : "") + " onchange=\"patchPaused(\'" + esc(d.fqdn) + "\', this.checked)\"><span class=\"toggle-slider\"></span></label></td>" +
+      "<td><label class=\"toggle\"><span class=\"sr-only\">Paused</span><input type=\"checkbox\"" + (d.paused ? " checked" : "") + " onchange=\"patchPaused(\'" + esc(d.fqdn) + "\', this.checked)\"><span class=\"toggle-slider\"></span></label></td>" +
       "<td>" + (chipsHtml || "<span style=\"color:var(--gray)\">none</span>") + "</td>" +
       "<td><div class=\"actions\">" +
         "<button class=\"btn btn-secondary btn-sm\" onclick=\"checkNow(\'" + esc(d.fqdn) + "\', this)\">&#9654; Check</button>" +
-        "<button class=\"btn btn-danger btn-sm\" onclick=\"deleteDomain(\'" + esc(d.fqdn) + "\', this)\">&#10005;</button>" +
+        "<button class=\"btn btn-danger btn-sm\" onclick=\"deleteDomain(\'" + esc(d.fqdn) + "\', this)\" aria-label=\"Delete " + esc(d.fqdn) + "\">&#10005;</button>" +
       "</div></td>" +
       "</tr>";
   });
@@ -765,72 +879,245 @@ async function loadEvents() {
   }).join("");
 }
 
-/* ---- Settings ---- */
-async function loadSettings() {
-  var r = await apiJson("/budget");
-  var settingsBudget = document.getElementById("settings-budget-body");
-  if (r.ok) {
-    var b = r.body;
-    var pct = Math.min(100, Math.round(b.peakDuePerMinute / 45 * 100));
-    var fillCls = pct < 70 ? "ok" : pct < 95 ? "warn" : "over";
-    var wPct = Math.min(100, Math.round(b.d1WritesPerDay / 1000));
-    var wFillCls = wPct < 70 ? "ok" : "warn";
-    settingsBudget.innerHTML =
-      "<div class=\"budget-bar\">" +
-        "<span class=\"budget-bar-label\" style=\"width:140px\">Peak req/min</span>" +
-        "<div class=\"budget-bar-track\"><div class=\"budget-bar-fill " + fillCls + "\" style=\"width:" + pct + "%\"></div></div>" +
-        "<span class=\"budget-bar-label\">" + b.peakDuePerMinute + " / 45</span>" +
-      "</div>" +
-      "<div class=\"budget-bar\">" +
-        "<span class=\"budget-bar-label\" style=\"width:140px\">D1 writes/day</span>" +
-        "<div class=\"budget-bar-track\"><div class=\"budget-bar-fill " + wFillCls + "\" style=\"width:" + wPct + "%\"></div></div>" +
-        "<span class=\"budget-bar-label\">" + b.d1WritesPerDay.toLocaleString() + " / 100,000</span>" +
-      "</div>" +
-      "<div style=\"margin-top:10px;font-size:13px;color:var(--gray)\">Checks/day: " + b.checksPerDay + " &bull; Headroom: " + b.headroom + " &bull; " +
-        (b.withinFreeTier ? "<span style=\"color:var(--green)\">\u2705 Within free tier</span>" : "<span style=\"color:var(--red)\">\u26a0\ufe0f Over free tier</span>") + "</div>" +
-      (b.warnings && b.warnings.length ? "<div class=\"notice notice-warn\" style=\"margin-top:10px\">" + esc(b.warnings.join(" | ")) + "</div>" : "");
-  } else {
-    settingsBudget.textContent = "Failed to load budget.";
+/* ---- Settings: Users tab ---- */
+async function loadUsersTab() {
+  var tbody = document.getElementById("users-tbody");
+  if (!tbody) return;
+  var r = await apiJson("/users");
+  if (!r.ok) { tbody.innerHTML = "<tr><td colspan=\"6\" class=\"empty\">Failed to load users.</td></tr>"; return; }
+  var users = r.body;
+  if (!users.length) {
+    tbody.innerHTML = "<tr><td colspan=\"6\" class=\"empty\">No users. Add one above.</td></tr>";
+    return;
   }
-
-  var r2 = await apiJson("/channels");
-  var allowlistEl = document.getElementById("allowlist-display");
-  if (r2.ok) {
-    var hosts = [];
-    var seen = {};
-    r2.body.filter(function(c) { return c.type.startsWith("webhook"); }).forEach(function(c) {
-      try { var h = new URL(c.target).host; if (!seen[h]) { seen[h] = true; hosts.push(h); } } catch(e) {}
-    });
-    allowlistEl.innerHTML = hosts.length
-      ? hosts.map(function(h) { return "<div>&bull; " + esc(h) + "</div>"; }).join("")
-      : "<span style=\"color:var(--gray)\">No webhook channels configured. Default allowlist set via <code>WEBHOOK_HOST_ALLOWLIST_DEFAULT</code> in wrangler.toml.</span>";
-  } else {
-    allowlistEl.textContent = "Could not load channels.";
-  }
+  tbody.innerHTML = users.map(function(u) {
+    var statusHtml = u.disabled
+      ? "<span class=\"chip chip-dropping\">Disabled</span>"
+      : "<span class=\"chip chip-available\">Active</span>";
+    var toggleAction = u.disabled ? "enable" : "disable";
+    var toggleLabel = u.disabled ? "Enable" : "Disable";
+    return "<tr>" +
+      "<td>" + esc(u.email) + "</td>" +
+      "<td style=\"color:var(--gray);font-size:13px\">" + relTime(u.added_at) + "</td>" +
+      "<td style=\"color:var(--gray);font-size:13px\">" + (u.last_login_at ? relTime(u.last_login_at) : "—") + "</td>" +
+      "<td style=\"text-align:center\">" + (u.activeSessions || 0) + "</td>" +
+      "<td>" + statusHtml + "</td>" +
+      "<td><div class=\"actions\">" +
+        "<button class=\"btn btn-secondary btn-sm\" onclick=\"toggleUser(\'" + esc(u.email) + "\', \'" + toggleAction + "\')\">" + toggleLabel + "</button>" +
+        "<button class=\"btn btn-danger btn-sm\" onclick=\"deleteUser(\'" + esc(u.email) + "\')\" aria-label=\"Remove " + esc(u.email) + "\">Remove</button>" +
+      "</div></td>" +
+      "</tr>";
+  }).join("");
 }
 
-document.getElementById("update-session-token-btn").addEventListener("click", async function() {
-  var newToken = document.getElementById("session-token-input").value.trim();
-  if (!newToken) return;
-  setToken(newToken);
-  var r = await apiJson("/domains");
-  var msg = document.getElementById("token-update-msg");
+async function toggleUser(email, action) {
+  var r = await apiJson("/users/" + encodeURIComponent(email) + "/" + action, { method: "POST" });
+  if (!r.ok) { alert("Failed: " + (r.body.error || "unknown")); return; }
+  announce(email + " " + (action === "disable" ? "disabled" : "enabled"));
+  loadUsersTab();
+}
+
+async function deleteUser(email) {
+  if (!confirm("Remove " + email + " from the allowlist? Their sessions and passkeys will be deleted.")) return;
+  var r = await apiJson("/users/" + encodeURIComponent(email), { method: "DELETE" });
+  if (!r.ok) { alert("Failed: " + (r.body.error || "unknown")); return; }
+  announce(email + " removed");
+  loadUsersTab();
+}
+
+var addUserToggle = document.getElementById("add-user-toggle");
+var addUserForm = document.getElementById("add-user-form");
+var cancelUserBtn = document.getElementById("cancel-user-btn");
+var saveUserBtn = document.getElementById("save-user-btn");
+var addUserError = document.getElementById("add-user-error");
+
+addUserToggle.addEventListener("click", function() {
+  addUserForm.style.display = addUserForm.style.display === "none" ? "block" : "none";
+});
+cancelUserBtn.addEventListener("click", function() {
+  addUserForm.style.display = "none"; addUserError.style.display = "none";
+});
+saveUserBtn.addEventListener("click", async function() {
+  addUserError.style.display = "none";
+  var email = document.getElementById("new-user-email").value.trim();
+  if (!email) { showUserError("Email is required"); return; }
+  saveUserBtn.disabled = true;
+  var r = await apiJson("/users", { method: "POST", body: JSON.stringify({ email: email }) });
+  saveUserBtn.disabled = false;
   if (r.ok) {
-    msg.style.color = "var(--green)"; msg.textContent = "\u2705 Session token updated.";
+    addUserForm.style.display = "none";
+    document.getElementById("new-user-email").value = "";
+    announce(email + " added");
+    loadUsersTab();
   } else {
-    sessionStorage.setItem("ddw_token", getToken()); // revert if needed — token is wrong
-    msg.style.color = "var(--red)"; msg.textContent = "\u2717 Token rejected (401). Not saved.";
+    showUserError(r.body.error === "user_exists" ? "User already exists." : (r.body.details ? r.body.details.join("; ") : r.body.error || "Unknown error"));
   }
-  setTimeout(function() { msg.textContent = ""; }, 4000);
+});
+
+function showUserError(msg) {
+  addUserError.textContent = msg; addUserError.style.display = "block";
+}
+
+/* ---- Settings: Passkeys tab ---- */
+async function loadPasskeysTab() {
+  var tbody = document.getElementById("passkeys-tbody");
+  if (!tbody) return;
+  var r = await apiJson("/passkeys");
+  if (!r.ok) { tbody.innerHTML = "<tr><td colspan=\"5\" class=\"empty\">Failed to load passkeys.</td></tr>"; return; }
+  var passkeys = r.body;
+  if (!passkeys.length) {
+    tbody.innerHTML = "<tr><td colspan=\"5\" class=\"empty\">No passkeys registered yet.</td></tr>";
+    return;
+  }
+  tbody.innerHTML = passkeys.map(function(p) {
+    var transports = Array.isArray(p.transports) ? p.transports.join(", ") : (p.transports || "—");
+    return "<tr>" +
+      "<td>" + esc(p.deviceName || "Unnamed device") + "</td>" +
+      "<td style=\"font-size:13px;color:var(--gray)\">" + absTime(p.createdAt) + "</td>" +
+      "<td style=\"font-size:13px;color:var(--gray)\">" + (p.lastUsedAt ? relTime(p.lastUsedAt) : "—") + "</td>" +
+      "<td style=\"font-size:12px;color:var(--gray)\">" + esc(transports) + "</td>" +
+      "<td><button class=\"btn btn-danger btn-sm\" onclick=\"deletePasskey(\'" + esc(p.credentialId) + "\')\" aria-label=\"Remove passkey\">Remove</button></td>" +
+      "</tr>";
+  }).join("");
+}
+
+async function deletePasskey(credentialId) {
+  if (!confirm("Remove this passkey?")) return;
+  var r = await apiJson("/passkeys/" + encodeURIComponent(credentialId), { method: "DELETE" });
+  if (!r.ok) { alert("Failed: " + (r.body.error || "unknown")); return; }
+  announce("Passkey removed");
+  loadPasskeysTab();
+}
+
+var registerPasskeyBtn = document.getElementById("register-passkey-btn");
+var registerPasskeyForm = document.getElementById("register-passkey-form");
+var cancelPasskeyBtn = document.getElementById("cancel-passkey-btn");
+var registerPasskeyError = document.getElementById("register-passkey-error");
+
+registerPasskeyBtn.addEventListener("click", function() {
+  registerPasskeyForm.style.display = registerPasskeyForm.style.display === "none" ? "block" : "none";
+  registerPasskeyError.style.display = "none";
+});
+cancelPasskeyBtn.addEventListener("click", function() {
+  registerPasskeyForm.style.display = "none"; registerPasskeyError.style.display = "none";
+});
+
+document.getElementById("register-passkey-start-btn").addEventListener("click", async function() {
+  registerPasskeyError.style.display = "none";
+  var btn = this;
+  btn.disabled = true; btn.textContent = "Waiting…";
+  try {
+    var beginRes = await apiFetch("/passkeys/register/begin", { method: "POST", body: JSON.stringify({}) });
+    if (!beginRes.ok) {
+      var beginBody = await beginRes.json();
+      showPasskeyError(beginBody.error || "Failed to start registration");
+      return;
+    }
+    var options = await beginRes.json();
+    var attResp = await window.SimpleWebAuthnBrowser.startRegistration({ optionsJSON: options });
+    var deviceName = document.getElementById("passkey-device-name").value.trim() || null;
+    var finishPayload = Object.assign({}, attResp);
+    if (deviceName) finishPayload.deviceName = deviceName;
+    var finishRes = await apiFetch("/passkeys/register/finish", { method: "POST", body: JSON.stringify(finishPayload) });
+    var finishBody = await finishRes.json();
+    if (finishRes.ok && finishBody.ok) {
+      registerPasskeyForm.style.display = "none";
+      document.getElementById("passkey-device-name").value = "";
+      announce("Passkey registered");
+      loadPasskeysTab();
+    } else {
+      showPasskeyError(finishBody.reason || finishBody.error || "Registration failed");
+    }
+  } catch(err) {
+    if (err && err.name === "NotAllowedError") {
+      showPasskeyError("Registration cancelled or not allowed by the browser.");
+    } else {
+      showPasskeyError(String(err && err.message ? err.message : err));
+    }
+  } finally {
+    btn.disabled = false; btn.textContent = "Register";
+  }
+});
+
+function showPasskeyError(msg) {
+  registerPasskeyError.textContent = msg; registerPasskeyError.style.display = "block";
+}
+
+/* ---- Settings: Sessions tab ---- */
+async function loadSessionsTab() {
+  var tbody = document.getElementById("sessions-tbody");
+  if (!tbody) return;
+  var r = await apiJson("/sessions");
+  if (!r.ok) { tbody.innerHTML = "<tr><td colspan=\"6\" class=\"empty\">Failed to load sessions.</td></tr>"; return; }
+  var sessions = r.body;
+  if (!sessions.length) {
+    tbody.innerHTML = "<tr><td colspan=\"6\" class=\"empty\">No active sessions.</td></tr>";
+    return;
+  }
+  tbody.innerHTML = sessions.map(function(s) {
+    return "<tr>" +
+      "<td><code>" + esc(s.auth_method) + "</code></td>" +
+      "<td style=\"font-family:monospace;font-size:12px\">" + esc(s.ip_address || "—") + "</td>" +
+      "<td style=\"font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\" title=\"" + esc(s.user_agent || "") + "\">" + esc((s.user_agent || "—").slice(0, 60)) + "</td>" +
+      "<td style=\"font-size:13px;color:var(--gray)\">" + absTime(s.created_at) + "</td>" +
+      "<td style=\"font-size:13px;color:var(--gray)\">" + absTime(s.expires_at) + "</td>" +
+      "<td><button class=\"btn btn-danger btn-sm\" onclick=\"revokeSession(\'" + esc(s.session_id) + "\')\" aria-label=\"Revoke session\">Revoke</button></td>" +
+      "</tr>";
+  }).join("");
+}
+
+async function revokeSession(sessionId) {
+  if (!confirm("Revoke this session?")) return;
+  var r = await apiJson("/sessions/" + encodeURIComponent(sessionId), { method: "DELETE" });
+  if (!r.ok) { alert("Failed: " + (r.body.error || "unknown")); return; }
+  announce("Session revoked");
+  loadSessionsTab();
+}
+
+document.getElementById("revoke-all-sessions-btn").addEventListener("click", async function() {
+  if (!confirm("Revoke all your sessions? You will be signed out everywhere.")) return;
+  var r = await apiFetch("/sessions/revoke-all", { method: "POST" });
+  if (r.ok) { location.href = "/login"; }
+  else { var b = await r.json(); alert("Failed: " + (b.error || "unknown")); }
+});
+
+/* ---- Settings entry point ---- */
+async function loadSettings() {
+  loadConfigSubtab();
+  var emailChannels = S.channels.filter(function(c) { return c.type === "email"; });
+  var hasEmailError = emailChannels.some(function(c) { return c.last_delivery_result && c.last_delivery_result !== "ok"; });
+  var card = document.getElementById("email-status-card");
+  if (card) card.style.display = (emailChannels.length && hasEmailError) ? "block" : "none";
+}
+
+/* ---- Logout ---- */
+document.getElementById("logout-btn").addEventListener("click", async function() {
+  await apiFetch("/logout", { method: "POST" });
+  location.href = "/login";
 });
 
 /* ---- Boot ---- */
 async function initDashboard() {
+  var authed = await checkAuth();
+  if (!authed) return;
+
   document.getElementById("pause-btn").style.display = "";
+  document.getElementById("logout-btn").style.display = "";
+
   await Promise.all([loadChannels(), refreshBudget()]);
   await loadDomains();
-  pauseBtn.textContent = S.paused ? "\u25b6 Resume All" : "\u23f8 Pause All";
+  pauseBtn.textContent = S.paused ? "▶ Resume All" : "⏸ Pause All";
+
+  var sessionsRes = await apiJson("/sessions");
+  if (sessionsRes.ok && Array.isArray(sessionsRes.body) && sessionsRes.body.length) {
+    var current = sessionsRes.body[0];
+    if (current && current.auth_method === "bearer-break-glass") {
+      updateBreakGlassBanner("bearer-break-glass");
+    }
+  }
 }
+
+initDashboard();
 </script>
 </body>
 </html>
