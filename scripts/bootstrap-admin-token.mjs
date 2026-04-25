@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 
 const WORKER_NAME = 'domain-drop-watcher'
 const SECRET_NAME = 'ADMIN_TOKEN'
+const SESSION_SECRET_NAME = 'SESSION_SECRET'
 
 function checkSecretExists(workerName, secretName, runExecFileSync) {
   let output
@@ -42,36 +43,78 @@ export async function main(deps) {
   const runExecFileSync = deps?.execFileSync ?? execFileSync
   const genBytes = deps?.randomBytes ?? randomBytes
 
-  if (checkSecretExists(WORKER_NAME, SECRET_NAME, runExecFileSync)) {
+  const adminTokenExists = checkSecretExists(WORKER_NAME, SECRET_NAME, runExecFileSync)
+  const sessionSecretExists = checkSecretExists(WORKER_NAME, SESSION_SECRET_NAME, runExecFileSync)
+
+  if (adminTokenExists && sessionSecretExists) {
     process.stdout.write(
-      `[bootstrap] ${SECRET_NAME} already exists — leaving unchanged.\n`
+      `[bootstrap] ${SECRET_NAME} already exists — leaving unchanged.\n` +
+      `[bootstrap] ${SESSION_SECRET_NAME} already exists — leaving unchanged.\n`
     )
     return
   }
 
-  const token = genBytes(32).toString('base64url')
+  let adminToken = null
+  let sessionSecret = null
 
-  runExecFileSync(
-    'wrangler',
-    ['secret', 'put', SECRET_NAME, '--name', WORKER_NAME],
-    { input: token, encoding: 'utf8' }
-  )
+  if (!adminTokenExists) {
+    adminToken = genBytes(32).toString('base64url')
+    runExecFileSync(
+      'wrangler',
+      ['secret', 'put', SECRET_NAME, '--name', WORKER_NAME],
+      { input: adminToken, encoding: 'utf8' }
+    )
+  } else {
+    process.stdout.write(
+      `[bootstrap] ${SECRET_NAME} already exists — leaving unchanged.\n`
+    )
+  }
+
+  if (!sessionSecretExists) {
+    sessionSecret = genBytes(32).toString('base64url')
+    runExecFileSync(
+      'wrangler',
+      ['secret', 'put', SESSION_SECRET_NAME, '--name', WORKER_NAME],
+      { input: sessionSecret, encoding: 'utf8' }
+    )
+  } else {
+    process.stdout.write(
+      `[bootstrap] ${SESSION_SECRET_NAME} already exists — leaving unchanged.\n`
+    )
+  }
 
   const border = '='.repeat(60)
-  process.stdout.write(
-    `\n${border}\n` +
-    `[bootstrap] ADMIN_TOKEN generated and stored as a Cloudflare Secret.\n` +
-    `\n` +
-    `  Token: ${token}\n` +
-    `\n` +
-    `Copy this token now — it will not be shown again.\n` +
-    `Open your Worker URL and log in with this token.\n` +
-    `\n` +
-    `To rotate: delete the ADMIN_TOKEN Secret in the Cloudflare dashboard\n` +
-    `(Workers & Pages -> domain-drop-watcher -> Settings -> Variables and Secrets)\n` +
-    `then trigger a new deploy. The build log will show the new token once.\n` +
-    `${border}\n\n`
-  )
+  const lines = [`\n${border}\n`]
+
+  if (adminToken !== null) {
+    lines.push(
+      `[bootstrap] ADMIN_TOKEN generated and stored as a Cloudflare Secret.\n` +
+      `\n` +
+      `  Token: ${adminToken}\n` +
+      `\n` +
+      `Copy this token now — it will not be shown again.\n` +
+      `Open your Worker URL and log in with this token.\n` +
+      `\n` +
+      `To rotate: delete the ADMIN_TOKEN Secret in the Cloudflare dashboard\n` +
+      `(Workers & Pages -> domain-drop-watcher -> Settings -> Variables and Secrets)\n` +
+      `then trigger a new deploy. The build log will show the new token once.\n`
+    )
+  }
+
+  if (sessionSecret !== null) {
+    if (adminToken !== null) lines.push(`\n`)
+    lines.push(
+      `[bootstrap] SESSION_SECRET generated and stored as a Cloudflare Secret.\n` +
+      `\n` +
+      `  Secret: ${sessionSecret}\n` +
+      `\n` +
+      `This secret signs session cookies. Rotating it invalidates all active sessions.\n` +
+      `To rotate: delete SESSION_SECRET in the Cloudflare dashboard then redeploy.\n`
+    )
+  }
+
+  lines.push(`${border}\n\n`)
+  process.stdout.write(lines.join(''))
 }
 
 import { fileURLToPath } from 'node:url'

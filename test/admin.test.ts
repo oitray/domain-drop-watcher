@@ -370,6 +370,7 @@ function makeEnv(
     EVENTS: makeKV(),
     BOOTSTRAP: makeKV(),
     ADMIN_TOKEN: "correct-token",
+    SESSION_SECRET: "test-session-secret-placeholder-for-unit-tests",
     WEBHOOK_HOST_ALLOWLIST_DEFAULT: "*.webhook.office.com,hooks.slack.com,discord.com,discordapp.com",
     VERSION: "0.1.0-test",
     ASSETS: assets,
