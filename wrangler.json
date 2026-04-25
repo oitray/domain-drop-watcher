@@ -6,12 +6,13 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "domain-drop-watcher"
+      "database_name": "domain-drop-watcher",
+      "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
   "kv_namespaces": [
-    { "binding": "EVENTS" },
-    { "binding": "BOOTSTRAP" }
+    { "binding": "EVENTS", "id": "00000000000000000000000000000001" },
+    { "binding": "BOOTSTRAP", "id": "00000000000000000000000000000002" }
   ],
   "send_email": [
     { "type": "send_email", "name": "EMAIL" }

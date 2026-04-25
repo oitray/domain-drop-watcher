@@ -104,11 +104,25 @@ bootstrap cache.
 2. Sign in to your Cloudflare account (or create a free one).
 3. Authorize the Cloudflare Workers Builds GitHub App to fork this repo into your GitHub account. See **What you're authorizing** below.
 4. Optionally fill in `ALERT_FROM_ADDRESS` as a Secret in the deploy form if you want email alerts (must be @ a domain with Cloudflare Email Routing enabled). Leave blank for Teams/Slack/Discord webhooks only. No other fields are required.
-5. Click Deploy. Cloudflare provisions a D1 database and two KV namespaces automatically.
+5. Click Deploy. Cloudflare provisions a D1 database and two KV namespaces automatically. The `postdeploy` script applies `schema.sql` to the D1 database and generates your admin tokens — no manual step required.
 6. Watch the build log stream in the Cloudflare dashboard. Near the end, the build script prints a banner containing your auto-generated admin token. Copy it.
 7. **Visit your Worker URL** — shown at the top of the Cloudflare dashboard's Worker page as `https://<name>.<account>.workers.dev`. That's your admin dashboard. Paste the token from step 6 into the login card to enter.
 
 The admin token is generated during Workers Builds CI and stored as a Cloudflare Secret (encrypted at rest). It never appears in any HTTP response. Build logs are scoped to your Cloudflare account — the same trust boundary that already permits Secret reads.
+
+### CLI deploy (wrangler)
+
+If you deploy via CLI instead of the "Deploy to Cloudflare" button, `npm run deploy` handles everything — `wrangler deploy` pushes the Worker, then `postdeploy` applies the schema and generates secrets. No manual `wrangler d1 execute` step is needed.
+
+If you need to apply the schema separately (e.g., after a fresh `wrangler deploy` without `npm run`), run:
+
+```bash
+# First deploy or after any schema.sql change — safe to re-run (all statements use IF NOT EXISTS)
+wrangler d1 execute domain-drop-watcher --file=schema.sql --remote
+
+# Local development
+wrangler d1 execute domain-drop-watcher --file=schema.sql --local --persist-to .wrangler/state
+```
 
 > **Note on build-log retention.** Build logs are retained by Cloudflare per their Workers Builds policy. If you want a fresh exposure window, rotate periodically after first login: `wrangler secret put ADMIN_TOKEN --name domain-drop-watcher` (enter your own value), then redeploy.
 
@@ -393,6 +407,12 @@ Contributors can run the Worker locally with `wrangler dev`:
     cd domain-drop-watcher
     npm install
     npm run dev
+
+Before the first local run, seed the schema into the local D1 emulator:
+
+    wrangler d1 execute domain-drop-watcher --file=schema.sql --local --persist-to .wrangler/state
+
+This is a one-time step per local workspace. Re-run it after any `schema.sql` change (safe — all statements use `IF NOT EXISTS`). Create a `.dev.vars` file with placeholder secrets (see `.dev.vars` in `.gitignore`) so the Worker starts without real Cloudflare credentials.
 
 This runs against `wrangler`'s local emulator. No Cloudflare account required for code changes. See CONTRIBUTING.md for full setup.
 

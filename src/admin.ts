@@ -1645,6 +1645,16 @@ export async function handleAdmin(
     );
   }
 
+  // Pass /vendor/* and other static assets through to the ASSETS binding.
+  // run_worker_first: true intercepts ALL requests before CF serves static files,
+  // so any path not explicitly handled above must be forwarded here.
+  if (pathname.startsWith("/vendor/") && method === "GET") {
+    if (env.ASSETS) {
+      return env.ASSETS.fetch(req);
+    }
+    return jsonErr(404, "not_found");
+  }
+
   if (pathname === "/login" && method === "GET") {
     return handleGetLogin(env, env.DB);
   }
