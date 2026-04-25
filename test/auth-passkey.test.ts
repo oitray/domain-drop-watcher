@@ -184,7 +184,7 @@ function makeEnv(): Env {
     BOOTSTRAP: {} as unknown,
     ADMIN_TOKEN: "test-token",
     SESSION_SECRET: "test-session-secret-placeholder-for-unit-tests",
-    WEBHOOK_HOST_ALLOWLIST_DEFAULT: "*.webhook.office.com,hooks.slack.com",
+    WEBHOOK_HOST_ALLOWLIST: "*.webhook.office.com,hooks.slack.com",
     VERSION: "0.1.0-test",
     ALERT_FROM_ADDRESS: "no-reply@example.com",
     EMAIL: { send: async () => {} },

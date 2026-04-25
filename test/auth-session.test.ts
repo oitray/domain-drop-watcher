@@ -160,7 +160,7 @@ function makeEnv(secret = "test-hmac-secret-32bytes-padding!"): Env {
     BOOTSTRAP: {} as Env["BOOTSTRAP"],
     ADMIN_TOKEN: "admin-token",
     SESSION_SECRET: secret,
-    WEBHOOK_HOST_ALLOWLIST_DEFAULT: "",
+    WEBHOOK_HOST_ALLOWLIST: "",
     VERSION: "test",
   };
 }

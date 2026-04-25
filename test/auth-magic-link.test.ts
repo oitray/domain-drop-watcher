@@ -178,7 +178,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     BOOTSTRAP: {} as Env["BOOTSTRAP"],
     ADMIN_TOKEN: "token",
     SESSION_SECRET: "test-secret-32bytes-paddingXXXXX!",
-    WEBHOOK_HOST_ALLOWLIST_DEFAULT: "",
+    WEBHOOK_HOST_ALLOWLIST: "",
     VERSION: "test",
     ALERT_FROM_ADDRESS: "no-reply@example.com",
     EMAIL: { send: async () => {} },

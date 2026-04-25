@@ -115,29 +115,20 @@ describe("isWebhookAllowed — rejections", () => {
 });
 
 describe("parseAllowlist", () => {
-  it("returns fallback when env var is undefined", () => {
-    const result = parseAllowlist(undefined, "webhook.office.com,hooks.slack.com");
-    expect(result).toEqual(["webhook.office.com", "hooks.slack.com"]);
+  it("returns empty array when env var is empty string", () => {
+    const result = parseAllowlist("");
+    expect(result).toEqual([]);
   });
 
-  it("returns fallback when env var is empty string", () => {
-    const result = parseAllowlist("", "webhook.office.com");
-    expect(result).toEqual(["webhook.office.com"]);
-  });
-
-  it("splits and trims when env var is present", () => {
+  it("splits and trims entries", () => {
     const result = parseAllowlist(
       "  hooks.slack.com ,  discord.com  , webhook.office.com ",
-      "fallback.example.com",
     );
     expect(result).toEqual(["hooks.slack.com", "discord.com", "webhook.office.com"]);
   });
 
   it("deduplicates entries", () => {
-    const result = parseAllowlist(
-      "hooks.slack.com,hooks.slack.com,discord.com",
-      "fallback.example.com",
-    );
+    const result = parseAllowlist("hooks.slack.com,hooks.slack.com,discord.com");
     expect(result).toEqual(["hooks.slack.com", "discord.com"]);
   });
 });

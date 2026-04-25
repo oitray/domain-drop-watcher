@@ -188,10 +188,7 @@ export async function dispatchAlert(
           }
         }
       } else {
-        const allowlist = parseAllowlist(
-          ctx.env.WEBHOOK_HOST_ALLOWLIST,
-          ctx.env.WEBHOOK_HOST_ALLOWLIST_DEFAULT,
-        );
+        const allowlist = parseAllowlist(ctx.env.WEBHOOK_HOST_ALLOWLIST);
         const check = isWebhookAllowed(channel.target, allowlist);
         if (!check.allowed) {
           result = { channelId: channel.id, ok: false, error: `not-allowed:${check.reason ?? "unknown"}` };

@@ -7,8 +7,7 @@ export interface Env {
   WEBAUTHN_RP_ID?: string;
   EMAIL?: { send: (message: unknown) => Promise<void> };
   ALERT_FROM_ADDRESS?: string;
-  WEBHOOK_HOST_ALLOWLIST?: string;
-  WEBHOOK_HOST_ALLOWLIST_DEFAULT: string;
+  WEBHOOK_HOST_ALLOWLIST: string;
   VERSION?: string;
   ASSETS?: { fetch: (req: Request) => Promise<Response> };
 }
