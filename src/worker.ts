@@ -27,6 +27,35 @@ export default {
     if ((await getConfig(env.DB, "global_paused")) === "1") return;
 
     const now = Math.floor(Date.now() / 1000);
+
+    // Auth cleanup runs once per 6h window. Cron fires every minute, so the
+    // modulo check fires in the first minute of each 6h window exactly once.
+    if (now % (6 * 3600) < 60) {
+      const cutoffShort = now - 86_400;        // login_attempts / login_codes: 24h
+      const cutoffSession = now;               // sessions: expires_at already encodes TTL
+      const cutoffChallenge = now;             // auth_challenges: expires_at
+      const cutoffEvents = now - 90 * 86_400; // auth_events: 90-day retention
+      ctx.waitUntil(
+        (async () => {
+          await env.DB.prepare(
+            "DELETE FROM login_attempts WHERE rowid IN (SELECT rowid FROM login_attempts WHERE ts < ? LIMIT 5000)",
+          ).bind(cutoffShort).run();
+          await env.DB.prepare(
+            "DELETE FROM login_codes WHERE rowid IN (SELECT rowid FROM login_codes WHERE expires_at < ? LIMIT 5000)",
+          ).bind(cutoffSession).run();
+          await env.DB.prepare(
+            "DELETE FROM sessions WHERE rowid IN (SELECT rowid FROM sessions WHERE expires_at < ? LIMIT 5000)",
+          ).bind(cutoffSession).run();
+          await env.DB.prepare(
+            "DELETE FROM auth_challenges WHERE rowid IN (SELECT rowid FROM auth_challenges WHERE expires_at < ? LIMIT 5000)",
+          ).bind(cutoffChallenge).run();
+          await env.DB.prepare(
+            "DELETE FROM auth_events WHERE rowid IN (SELECT rowid FROM auth_events WHERE ts < ? LIMIT 5000)",
+          ).bind(cutoffEvents).run();
+        })(),
+      );
+    }
+
     const due = await getDueDomains(env.DB, now, 45);
     if (due.length === 0) return;
 

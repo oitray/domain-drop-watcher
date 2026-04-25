@@ -63,6 +63,10 @@ Update these checkboxes as you complete work. Include commit SHA.
 
 _none yet_
 
+## Phase 12 — Multi-user auth (in progress, branch: feat/868jd3n6k-magic-link-passkey-auth)
+
+- Phase 6 integrated: `authenticate` middleware, login/logout/users/sessions routes, scheduled cron cleanup.
+
 ## Phase 10 — CF Deploy Button migration (2026-04-23)
 
 ### Summary

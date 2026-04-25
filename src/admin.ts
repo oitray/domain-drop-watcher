@@ -21,11 +21,50 @@ import { computeBudget, pickLeastLoadedOffset } from "./budget.js";
 import { isWebhookAllowed, parseAllowlist } from "./webhooks.js";
 import { detectWebhookType } from "./alerts.js";
 import { lookupDomain } from "./rdap.js";
+import {
+  verifySessionCookie,
+  createSession,
+  revokeSession,
+  serializeSessionCookie,
+  clearSessionCookie,
+} from "./auth/session.js";
+import { issueLoginCode, redeemLoginCode } from "./auth/magic-link.js";
+import { checkSendCodeRate, checkVerifyCodeRate, recordLoginAttempt } from "./auth/rate-limit.js";
+import {
+  listUsers,
+  addUser,
+  removeUser,
+  setUserDisabled,
+  recordUserLogin,
+  userCount,
+  UserExistsError,
+} from "./auth/users.js";
+
+// ---------------------------------------------------------------------------
+// Auth identity
+// ---------------------------------------------------------------------------
+
+export interface AuthIdentity {
+  email: string | null;
+  method: "session" | "bearer-break-glass" | "email-code" | "passkey";
+}
+
+// ---------------------------------------------------------------------------
+// Response helpers
+// ---------------------------------------------------------------------------
 
 const JSON_HEADERS: HeadersInit = {
   "content-type": "application/json",
   "X-Content-Type-Options": "nosniff",
   "Cache-Control": "no-store",
+};
+
+const AUTH_PAGE_HEADERS: HeadersInit = {
+  "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Cache-Control": "no-store",
+  "Referrer-Policy": "no-referrer",
 };
 
 const DASHBOARD_CSP =
@@ -59,19 +98,80 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 function resolveAdminToken(env: Env): string | null {
-  const t = env.ADMIN_TOKEN?.trim()
-  return t && t.length > 0 ? t : null
+  const t = env.ADMIN_TOKEN?.trim();
+  return t && t.length > 0 ? t : null;
 }
 
-async function checkAuth(req: Request, env: Env): Promise<boolean> {
-  const header = req.headers.get("authorization") ?? "";
-  const match = /^Bearer (.+)$/i.exec(header);
-  if (!match) return false;
-  const provided = match[1] ?? "";
-  const token = resolveAdminToken(env);
-  if (!token) return false;
-  return timingSafeEqual(provided, token);
+// ---------------------------------------------------------------------------
+// Unified authenticate middleware
+// ---------------------------------------------------------------------------
+
+async function authenticate(
+  req: Request,
+  env: Env,
+  db: D1Database,
+): Promise<AuthIdentity | null> {
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const cookieMatch = /(?:^|;\s*)dropwatch_session=([^\s;]+)/.exec(cookieHeader);
+  if (cookieMatch?.[1]) {
+    const identity = await verifySessionCookie(env, db, cookieMatch[1]);
+    if (identity) {
+      return {
+        email: identity.email,
+        method: identity.authMethod as AuthIdentity["method"],
+      };
+    }
+  }
+
+  const authHeader = req.headers.get("authorization") ?? "";
+  const match = /^Bearer (.+)$/i.exec(authHeader);
+  if (match) {
+    const provided = match[1] ?? "";
+    const token = resolveAdminToken(env);
+    if (token && timingSafeEqual(provided, token)) {
+      return { email: null, method: "bearer-break-glass" };
+    }
+  }
+
+  return null;
 }
+
+// ---------------------------------------------------------------------------
+// Auth event logging
+// ---------------------------------------------------------------------------
+
+async function logAuthEvent(
+  db: D1Database,
+  event: {
+    email?: string | null;
+    event_type: string;
+    auth_method?: string | null;
+    ip_address?: string | null;
+    user_agent?: string | null;
+    metadata?: string | null;
+  },
+): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .prepare(
+      `INSERT INTO auth_events (ts, email, event_type, auth_method, ip_address, user_agent, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      now,
+      event.email ?? null,
+      event.event_type,
+      event.auth_method ?? null,
+      event.ip_address ?? null,
+      event.user_agent ?? null,
+      event.metadata ?? null,
+    )
+    .run();
+}
+
+// ---------------------------------------------------------------------------
+// Validation helpers
+// ---------------------------------------------------------------------------
 
 const VALID_NOTIFY_ON = new Set(["available", "dropping", "expiring", "registered"]);
 const VALID_CHANNEL_TYPES = new Set<ChannelType>([
@@ -83,6 +183,7 @@ const VALID_CHANNEL_TYPES = new Set<ChannelType>([
 ]);
 const FQDN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
 const EMAIL_RE = /^[A-Za-z0-9._+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/;
+const BASIC_EMAIL_RE = /^[^@]+@[^@]+$/;
 
 interface ValidationOk<T> { ok: true; value: T }
 interface ValidationFail { ok: false; errors: string[] }
@@ -226,6 +327,10 @@ async function insertDomainWithChannels(
   const domain = await getDomain(db, input.fqdn);
   return { inserted: true, domain: domain ?? undefined };
 }
+
+// ---------------------------------------------------------------------------
+// Domain + channel handlers
+// ---------------------------------------------------------------------------
 
 async function handleGetDomains(env: Env): Promise<Response> {
   const domains = await listDomains(env.DB, { includePaused: true });
@@ -609,10 +714,532 @@ async function handleGetEvents(req: Request, env: Env): Promise<Response> {
   return json(events);
 }
 
+// ---------------------------------------------------------------------------
+// Login page
+// ---------------------------------------------------------------------------
+
+async function handleGetLogin(env: Env, db: D1Database): Promise<Response> {
+  const count = await userCount(db);
+  const emptyAllowlist = count === 0;
+  const bannerHtml = emptyAllowlist
+    ? `<div class="banner banner-warning">No users configured yet. Use your ADMIN_TOKEN below to log in and add the first user.</div>`
+    : "";
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>domain-drop-watcher sign in</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:400px;margin:40px auto;padding:0 16px}
+.banner{padding:12px;border-radius:4px;margin-bottom:16px}
+.banner-warning{background:#fff3cd;border:1px solid #ffc107;color:#856404}
+label{display:block;margin-bottom:4px;font-weight:500}
+input,textarea{width:100%;box-sizing:border-box;padding:8px;margin-bottom:12px;border:1px solid #ccc;border-radius:4px;font-size:1rem}
+button{padding:8px 16px;background:#0066cc;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:1rem}
+button:hover{background:#0052a3}
+details{margin-top:16px}
+summary{cursor:pointer;color:#0066cc}
+</style>
+</head>
+<body>
+<h1>Sign in</h1>
+${bannerHtml}
+<form id="email-form">
+  <label for="email">Email address</label>
+  <input type="email" id="email" name="email" required autocomplete="email">
+  <button type="submit">Send me a sign-in code</button>
+</form>
+<form id="code-form" style="display:none">
+  <label for="code">6-digit code</label>
+  <input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code">
+  <button type="submit">Verify code</button>
+</form>
+<div id="passkey-section"></div>
+<details ${emptyAllowlist ? "open" : ""}>
+  <summary>Break-glass: admin token</summary>
+  <form id="token-form">
+    <label for="admin-token">ADMIN_TOKEN</label>
+    <textarea id="admin-token" name="admin-token" rows="3" style="font-family:monospace;font-size:0.85rem"></textarea>
+    <button type="submit">Sign in with token</button>
+  </form>
+</details>
+<div id="msg" style="margin-top:12px;color:#c00"></div>
+<script>
+const origin = location.origin;
+let pendingEmail = '';
+document.getElementById('email-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  pendingEmail = document.getElementById('email').value;
+  const r = await fetch('/login/email-code', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:pendingEmail})});
+  if (r.status === 429) {
+    const j = await r.json();
+    document.getElementById('msg').textContent = 'Too many attempts. ' + (j.message || '');
+  } else {
+    document.getElementById('email-form').style.display='none';
+    document.getElementById('code-form').style.display='block';
+    document.getElementById('msg').textContent = '';
+  }
+});
+document.getElementById('code-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const code = document.getElementById('code').value;
+  const r = await fetch('/login/verify-code', {method:'POST',headers:{'Content-Type':'application/json','Origin':origin},body:JSON.stringify({email:pendingEmail,code})});
+  const j = await r.json();
+  if (r.ok) { location.href = j.redirect || '/'; }
+  else { document.getElementById('msg').textContent = 'Invalid or expired code. Try again.'; }
+});
+document.getElementById('token-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const token = document.getElementById('admin-token').value.trim();
+  const r = await fetch('/domains', {headers:{'Authorization':'Bearer '+token}});
+  if (r.ok) { location.href = '/'; }
+  else { document.getElementById('msg').textContent = 'Invalid admin token.'; }
+});
+</script>
+</body>
+</html>`;
+
+  return new Response(html, {
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8", ...AUTH_PAGE_HEADERS },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// POST /login/email-code
+// ---------------------------------------------------------------------------
+
+async function handlePostLoginEmailCode(
+  req: Request,
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
+  const ua = req.headers.get("User-Agent") ?? null;
+  const now = Math.floor(Date.now() / 1000);
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return jsonErr(400, "validation_failed", { details: ["body: invalid JSON"] });
+  }
+
+  const email = typeof body["email"] === "string" ? body["email"].trim() : "";
+  if (!email) {
+    return jsonErr(400, "validation_failed", { details: ["email: required"] });
+  }
+
+  const rateDecision = await checkSendCodeRate(db, email, ip, now);
+  if (!rateDecision.allowed) {
+    return new Response(
+      JSON.stringify({ error: "rate_limited", message: "Too many attempts. Please wait before requesting another code." }),
+      {
+        status: 429,
+        headers: {
+          ...JSON_HEADERS,
+          "Retry-After": String(rateDecision.retryAfterSec ?? 900),
+        },
+      },
+    );
+  }
+
+  const result = await issueLoginCode(env, db, ctx, email);
+
+  ctx.waitUntil(recordLoginAttempt(db, "email", email.toLowerCase(), "code_sent", now));
+  ctx.waitUntil(recordLoginAttempt(db, "ip", ip, "code_sent", now));
+
+  if (!result.codeSent) {
+    ctx.waitUntil(
+      logAuthEvent(db, {
+        email: email.toLowerCase(),
+        event_type: "login_fail",
+        auth_method: "email-code",
+        ip_address: ip,
+        user_agent: ua,
+        metadata: JSON.stringify({ reason: "unknown_email" }),
+      }),
+    );
+  }
+
+  return json(
+    { ok: true, message: "If your email is registered, a 6-digit code is on its way." },
+    202,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// POST /login/verify-code
+// ---------------------------------------------------------------------------
+
+async function handlePostLoginVerifyCode(
+  req: Request,
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const workerOrigin = new URL(req.url).origin;
+  const reqOrigin = req.headers.get("Origin");
+
+  if (!reqOrigin || reqOrigin !== workerOrigin) {
+    return jsonErr(403, "forbidden", { message: "Origin header mismatch" });
+  }
+
+  const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
+  const ua = req.headers.get("User-Agent") ?? null;
+  const now = Math.floor(Date.now() / 1000);
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return jsonErr(400, "validation_failed", { details: ["body: invalid JSON"] });
+  }
+
+  const email = typeof body["email"] === "string" ? body["email"].trim() : "";
+  const code = typeof body["code"] === "string" ? body["code"].trim() : "";
+
+  if (!email || !code) {
+    return jsonErr(400, "validation_failed", { details: ["email and code are required"] });
+  }
+
+  const rateDecision = await checkVerifyCodeRate(db, email, now);
+  if (!rateDecision.allowed) {
+    return new Response(
+      JSON.stringify({ error: "rate_limited" }),
+      {
+        status: 429,
+        headers: { ...JSON_HEADERS, "Retry-After": String(rateDecision.retryAfterSec ?? 600) },
+      },
+    );
+  }
+
+  const redeemResult = await redeemLoginCode(env, db, email, code);
+
+  if (!redeemResult.ok) {
+    ctx.waitUntil(recordLoginAttempt(db, "email", email.toLowerCase(), "code_verify_fail", now));
+    ctx.waitUntil(recordLoginAttempt(db, "ip", ip, "code_verify_fail", now));
+    ctx.waitUntil(
+      logAuthEvent(db, {
+        email: email.toLowerCase(),
+        event_type: "login_fail",
+        auth_method: "email-code",
+        ip_address: ip,
+        user_agent: ua,
+        metadata: JSON.stringify({ reason: redeemResult.reason }),
+      }),
+    );
+    return jsonErr(401, "invalid_code");
+  }
+
+  const session = await createSession(env, db, {
+    email: email.toLowerCase(),
+    authMethod: "email-code",
+    userAgent: ua,
+    ipAddress: ip,
+  });
+
+  await recordUserLogin(db, email.toLowerCase(), now);
+
+  ctx.waitUntil(recordLoginAttempt(db, "email", email.toLowerCase(), "code_verify_ok", now));
+  ctx.waitUntil(recordLoginAttempt(db, "ip", ip, "code_verify_ok", now));
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: email.toLowerCase(),
+      event_type: "login_ok",
+      auth_method: "email-code",
+      ip_address: ip,
+      user_agent: ua,
+    }),
+  );
+
+  return new Response(JSON.stringify({ ok: true, redirect: "/" }), {
+    status: 200,
+    headers: {
+      ...JSON_HEADERS,
+      "Set-Cookie": serializeSessionCookie(session.cookieValue),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// POST /logout
+// ---------------------------------------------------------------------------
+
+async function handlePostLogout(
+  req: Request,
+  env: Env,
+  db: D1Database,
+  identity: AuthIdentity,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const cookieMatch = /(?:^|;\s*)dropwatch_session=([^\s;]+)/.exec(cookieHeader);
+  const rawCookieVal = cookieMatch?.[1] ?? "";
+  const sessionId = rawCookieVal.split(".")[0] ?? "";
+
+  if (sessionId) {
+    await revokeSession(db, sessionId);
+  }
+
+  const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
+  const ua = req.headers.get("User-Agent") ?? null;
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: identity.email,
+      event_type: "logout",
+      auth_method: identity.method,
+      ip_address: ip,
+      user_agent: ua,
+    }),
+  );
+
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { ...JSON_HEADERS, "Set-Cookie": clearSessionCookie() },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// User management routes
+// ---------------------------------------------------------------------------
+
+async function handleGetUsers(env: Env, db: D1Database): Promise<Response> {
+  const users = await listUsers(db);
+  const now = Math.floor(Date.now() / 1000);
+  const usersWithSessions = await Promise.all(
+    users.map(async (u) => {
+      const sessionRow = await db
+        .prepare("SELECT COUNT(*) AS cnt FROM sessions WHERE email = ? AND expires_at > ?")
+        .bind(u.email, now)
+        .first<{ cnt: number }>();
+      return { ...u, activeSessions: sessionRow?.cnt ?? 0 };
+    }),
+  );
+  return json(usersWithSessions);
+}
+
+async function handlePostUser(
+  req: Request,
+  env: Env,
+  db: D1Database,
+  identity: AuthIdentity,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return jsonErr(400, "validation_failed", { details: ["body: invalid JSON"] });
+  }
+
+  const email = typeof body["email"] === "string" ? body["email"].trim() : "";
+  if (!email || !BASIC_EMAIL_RE.test(email)) {
+    return jsonErr(400, "validation_failed", { details: ["email: required and must contain @"] });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    const user = await addUser(db, email, now);
+    const actor = identity.email ?? "bearer";
+    ctx.waitUntil(
+      logAuthEvent(db, {
+        email: user.email,
+        event_type: "user_added",
+        ip_address: req.headers.get("CF-Connecting-IP"),
+        user_agent: req.headers.get("User-Agent"),
+        metadata: JSON.stringify({ actor }),
+      }),
+    );
+    return json(user, 201);
+  } catch (e) {
+    if (e instanceof UserExistsError) {
+      return jsonErr(409, "user_exists");
+    }
+    throw e;
+  }
+}
+
+async function handleDeleteUser(
+  targetEmail: string,
+  req: Request,
+  db: D1Database,
+  identity: AuthIdentity,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const deleted = await removeUser(db, targetEmail);
+  if (!deleted) return jsonErr(404, "not_found");
+
+  const actor = identity.email ?? "bearer";
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: targetEmail.toLowerCase(),
+      event_type: "user_removed",
+      ip_address: req.headers.get("CF-Connecting-IP"),
+      user_agent: req.headers.get("User-Agent"),
+      metadata: JSON.stringify({ actor }),
+    }),
+  );
+  return json({ deleted: true });
+}
+
+async function handleUserDisable(
+  targetEmail: string,
+  disabled: boolean,
+  req: Request,
+  db: D1Database,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const ok = await setUserDisabled(db, targetEmail, disabled);
+  if (!ok) return jsonErr(404, "not_found");
+
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: targetEmail.toLowerCase(),
+      event_type: disabled ? "user_disabled" : "user_enabled",
+      ip_address: req.headers.get("CF-Connecting-IP"),
+      user_agent: req.headers.get("User-Agent"),
+    }),
+  );
+  return json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// Session management routes
+// ---------------------------------------------------------------------------
+
+async function handleGetSessions(
+  db: D1Database,
+  identity: AuthIdentity,
+): Promise<Response> {
+  const now = Math.floor(Date.now() / 1000);
+  const email = identity.email;
+  if (!email) return jsonErr(403, "forbidden");
+
+  const rows = await db
+    .prepare(
+      `SELECT session_id, email, created_at, expires_at, user_agent, ip_address, auth_method
+       FROM sessions WHERE email = ? AND expires_at > ? ORDER BY created_at DESC`,
+    )
+    .bind(email, now)
+    .all<{
+      session_id: string;
+      email: string;
+      created_at: number;
+      expires_at: number;
+      user_agent: string | null;
+      ip_address: string | null;
+      auth_method: string;
+    }>();
+
+  return json(rows.results);
+}
+
+async function handleDeleteSession(
+  sessionId: string,
+  req: Request,
+  db: D1Database,
+  identity: AuthIdentity,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (!identity.email) return jsonErr(403, "forbidden");
+  await revokeSession(db, sessionId);
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: identity.email,
+      event_type: "session_revoked",
+      ip_address: req.headers.get("CF-Connecting-IP"),
+      user_agent: req.headers.get("User-Agent"),
+      metadata: JSON.stringify({ session_id: sessionId }),
+    }),
+  );
+  return json({ ok: true });
+}
+
+async function handleRevokeAllSessions(
+  req: Request,
+  db: D1Database,
+  identity: AuthIdentity,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (!identity.email) return jsonErr(403, "forbidden");
+
+  await db
+    .prepare("DELETE FROM sessions WHERE email = ?")
+    .bind(identity.email)
+    .run();
+
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: identity.email,
+      event_type: "session_revoked",
+      ip_address: req.headers.get("CF-Connecting-IP"),
+      user_agent: req.headers.get("User-Agent"),
+      metadata: JSON.stringify({ scope: "all" }),
+    }),
+  );
+
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { ...JSON_HEADERS, "Set-Cookie": clearSessionCookie() },
+  });
+}
+
+async function handleRevokeUserAllSessions(
+  targetEmail: string,
+  req: Request,
+  db: D1Database,
+  identity: AuthIdentity,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (!identity.email) return jsonErr(403, "forbidden");
+
+  await db
+    .prepare("DELETE FROM sessions WHERE email = ?")
+    .bind(targetEmail.toLowerCase())
+    .run();
+
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: identity.email,
+      event_type: "session_revoked",
+      ip_address: req.headers.get("CF-Connecting-IP"),
+      user_agent: req.headers.get("User-Agent"),
+      metadata: JSON.stringify({ scope: "all", target_email: targetEmail.toLowerCase() }),
+    }),
+  );
+
+  return json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// GET /auth/health (bearer-only)
+// ---------------------------------------------------------------------------
+
+async function handleAuthHealth(env: Env, db: D1Database): Promise<Response> {
+  const count = await userCount(db);
+  return json({
+    email_routing_bound: env.EMAIL !== undefined,
+    alert_from_set: !!env.ALERT_FROM_ADDRESS,
+    session_secret_set: !!env.SESSION_SECRET,
+    admin_token_set: !!resolveAdminToken(env),
+    allowlist_size: count,
+    rp_id: env.WEBAUTHN_RP_ID ?? null,
+    webauthn_available: false,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Main request handler
+// ---------------------------------------------------------------------------
+
 export async function handleAdmin(
   req: Request,
   env: Env,
-  _ctx: ExecutionContext,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const url = new URL(req.url);
   const pathname = url.pathname;
@@ -641,8 +1268,85 @@ export async function handleAdmin(
     );
   }
 
-  if (!(await checkAuth(req, env))) {
+  if (pathname === "/login" && method === "GET") {
+    return handleGetLogin(env, env.DB);
+  }
+
+  if (pathname === "/login/email-code" && method === "POST") {
+    return handlePostLoginEmailCode(req, env, env.DB, ctx);
+  }
+
+  if (pathname === "/login/verify-code" && method === "POST") {
+    return handlePostLoginVerifyCode(req, env, env.DB, ctx);
+  }
+
+  const identity = await authenticate(req, env, env.DB);
+
+  if (!identity) {
     return jsonErr(401, "unauthorized");
+  }
+
+  // Log bearer break-glass on state-changing POSTs only; GETs excluded to reduce noise.
+  // A single row per POST is acceptable v1 granularity — documented here.
+  if (identity.method === "bearer-break-glass" && method === "POST") {
+    ctx.waitUntil(
+      logAuthEvent(env.DB, {
+        email: null,
+        event_type: "bearer_break_glass",
+        auth_method: "bearer-break-glass",
+        ip_address: req.headers.get("CF-Connecting-IP"),
+        user_agent: req.headers.get("User-Agent"),
+        metadata: JSON.stringify({ path: pathname }),
+      }),
+    );
+  }
+
+  if (pathname === "/auth/health" && method === "GET") {
+    if (identity.method !== "bearer-break-glass") return jsonErr(403, "forbidden");
+    return handleAuthHealth(env, env.DB);
+  }
+
+  if (pathname === "/logout" && method === "POST") {
+    return handlePostLogout(req, env, env.DB, identity, ctx);
+  }
+
+  if (pathname === "/users" && method === "GET") {
+    return handleGetUsers(env, env.DB);
+  }
+  if (pathname === "/users" && method === "POST") {
+    return handlePostUser(req, env, env.DB, identity, ctx);
+  }
+
+  const userMatch = /^\/users\/([^/]+)$/.exec(pathname);
+  if (userMatch) {
+    const userEmail = decodeURIComponent(userMatch[1] ?? "");
+    if (method === "DELETE") return handleDeleteUser(userEmail, req, env.DB, identity, ctx);
+  }
+
+  const userActionMatch = /^\/users\/([^/]+)\/(disable|enable)$/.exec(pathname);
+  if (userActionMatch && method === "POST") {
+    const userEmail = decodeURIComponent(userActionMatch[1] ?? "");
+    const action = userActionMatch[2]!;
+    return handleUserDisable(userEmail, action === "disable", req, env.DB, ctx);
+  }
+
+  const userSessionsMatch = /^\/users\/([^/]+)\/sessions\/revoke-all$/.exec(pathname);
+  if (userSessionsMatch && method === "POST") {
+    const targetEmail = decodeURIComponent(userSessionsMatch[1] ?? "");
+    return handleRevokeUserAllSessions(targetEmail, req, env.DB, identity, ctx);
+  }
+
+  if (pathname === "/sessions" && method === "GET") {
+    return handleGetSessions(env.DB, identity);
+  }
+  if (pathname === "/sessions/revoke-all" && method === "POST") {
+    return handleRevokeAllSessions(req, env.DB, identity, ctx);
+  }
+
+  const sessionDeleteMatch = /^\/sessions\/([^/]+)$/.exec(pathname);
+  if (sessionDeleteMatch && method === "DELETE") {
+    const sessionId = decodeURIComponent(sessionDeleteMatch[1] ?? "");
+    return handleDeleteSession(sessionId, req, env.DB, identity, ctx);
   }
 
   if (pathname === "/domains" && method === "GET") return handleGetDomains(env);
