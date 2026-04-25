@@ -6,6 +6,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Runs on Cloudflare Workers (free tier)](https://img.shields.io/badge/Runs%20on-Cloudflare%20Workers%20free%20tier-orange?logo=cloudflare)](https://developers.cloudflare.com/workers/)
 
+> **Recommended: fork first.** This button deploys directly from `oitray/domain-drop-watcher` `main`. Cloudflare Workers Builds will redeploy your Worker on every push to this upstream repo. For production stability, fork this repo first and click the deploy button on your fork's README — you control when upstream changes land.
+
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/oitray/domain-drop-watcher)
 
 One click. No CLI. Works on Windows, macOS, and Linux. Full setup details below.
