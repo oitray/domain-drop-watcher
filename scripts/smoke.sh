@@ -37,6 +37,21 @@ run() {
   fi
 }
 
+run_post_json() {
+  local label="$1" expected_code="$2" path="$3" body="$4"
+  local code
+  code=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+    -H "Content-Type: application/json" \
+    -d "$body" "$URL$path") || code="???"
+  if [[ "$code" == "$expected_code" ]]; then
+    printf '  \033[32mPASS\033[0m  %s (HTTP %s)\n' "$label" "$code"
+    PASS=$((PASS + 1))
+  else
+    printf '  \033[31mFAIL\033[0m  %s (got HTTP %s, expected %s)\n' "$label" "$code" "$expected_code"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
 check_json_field() {
   local label="$1" path="$2" field="$3"
   local got
@@ -78,6 +93,11 @@ echo "Shape checks:"
 check_json_field "/health reports ok"             /health ok
 check_json_field "/budget reports peakDuePerMinute" /budget peakDuePerMinute
 check_json_field "/budget reports withinFreeTier"   /budget withinFreeTier
+
+echo
+echo "Auth (unauthenticated):"
+run "/login returns 200"                                                 200 GET /login noauth
+run_post_json "/login/email-code nonexistent email returns 202 (enum-safe)" 202 /login/email-code '{"email":"no-such-user@example.invalid"}'
 
 echo
 echo "Negative:"
