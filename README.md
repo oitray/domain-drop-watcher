@@ -98,9 +98,11 @@ bootstrap cache.
 
 ## Deploy
 
+> **Recommended: fork first.** The button below deploys directly from `oitray/domain-drop-watcher` `main`. Cloudflare Workers Builds will redeploy your Worker on every push to this upstream repo. For production stability, fork this repo to your own GitHub account first, then click the deploy button on your fork's README. You control when upstream changes land by pulling them into your fork.
+
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/oitray/domain-drop-watcher)
 
-1. Click the button.
+1. Click the button (on your fork, per the note above).
 2. Sign in to your Cloudflare account (or create a free one).
 3. Authorize the Cloudflare Workers Builds GitHub App to fork this repo into your GitHub account. See **What you're authorizing** below.
 4. Optionally fill in `ALERT_FROM_ADDRESS` as a Secret in the deploy form if you want email alerts (must be @ a domain with Cloudflare Email Routing enabled). Leave blank for Teams/Slack/Discord webhooks only. No other fields are required.
