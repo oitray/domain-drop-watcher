@@ -12,7 +12,7 @@ interface Row {
   [key: string]: unknown;
 }
 
-type CoreTableName = "domains" | "channels" | "domain_channels" | "config";
+type CoreTableName = "domains" | "channels" | "domain_channels" | "config" | "config_meta";
 type AuthTableName = "users" | "sessions" | "login_codes" | "login_attempts" | "auth_events" | "auth_challenges" | "passkeys";
 type TableName = CoreTableName | AuthTableName;
 
@@ -22,6 +22,7 @@ function makeD1(seed?: { [table in CoreTableName]?: Row[] }): D1Database {
     channels: seed?.channels ?? [],
     domain_channels: seed?.domain_channels ?? [],
     config: seed?.config ?? [],
+    config_meta: seed?.config_meta ?? [],
     users: [],
     sessions: [],
     login_codes: [],
@@ -36,6 +37,7 @@ function makeD1(seed?: { [table in CoreTableName]?: Row[] }): D1Database {
     if (lower.includes("from domains") || lower.includes("into domains") || lower.includes("update domains") || lower.includes("delete from domains")) return "domains";
     if (lower.includes("from channels") || lower.includes("into channels") || lower.includes("update channels") || lower.includes("delete from channels")) return "channels";
     if (lower.includes("from domain_channels") || lower.includes("into domain_channels") || lower.includes("delete from domain_channels")) return "domain_channels";
+    if (lower.includes("from config_meta") || lower.includes("into config_meta") || lower.includes("update config_meta") || lower.includes("delete from config_meta")) return "config_meta";
     if (lower.includes("from config") || lower.includes("into config") || lower.includes("update config")) return "config";
     if (lower.includes("from users") || lower.includes("into users") || lower.includes("update users") || lower.includes("delete from users")) return "users";
     if (lower.includes("from sessions") || lower.includes("into sessions") || lower.includes("update sessions") || lower.includes("delete from sessions")) return "sessions";
@@ -210,6 +212,19 @@ function makeD1(seed?: { [table in CoreTableName]?: Row[] }): D1Database {
           tables.config[idx] = { k, v };
         } else {
           tables.config.push({ k, v });
+        }
+        return { results: [], changes: 1, last_row_id: 0 };
+      }
+
+      if (table === "config_meta" && lower.includes("on conflict")) {
+        const k = bindings[0] as string;
+        const updated_at = bindings[1] as number;
+        const updated_by = bindings[2] as string | null;
+        const idx = tables.config_meta.findIndex((r) => r["k"] === k);
+        if (idx >= 0) {
+          tables.config_meta[idx] = { k, updated_at, updated_by: updated_by ?? null };
+        } else {
+          tables.config_meta.push({ k, updated_at, updated_by: updated_by ?? null });
         }
         return { results: [], changes: 1, last_row_id: 0 };
       }
@@ -512,6 +527,21 @@ function makeD1(seed?: { [table in CoreTableName]?: Row[] }): D1Database {
         const before = tables.domain_channels.length;
         tables.domain_channels = tables.domain_channels.filter((r) => r["channel_id"] !== chId);
         return { results: [], changes: before - tables.domain_channels.length, last_row_id: 0 };
+      }
+
+      if (table === "config") {
+        const k = bindings[0] as string;
+        const before = tables.config.length;
+        tables.config = tables.config.filter((r) => r["k"] !== k);
+        tables.config_meta = tables.config_meta.filter((r) => r["k"] !== k);
+        return { results: [], changes: before - tables.config.length, last_row_id: 0 };
+      }
+
+      if (table === "config_meta") {
+        const k = bindings[0] as string;
+        const before = tables.config_meta.length;
+        tables.config_meta = tables.config_meta.filter((r) => r["k"] !== k);
+        return { results: [], changes: before - tables.config_meta.length, last_row_id: 0 };
       }
 
       if (table === "login_attempts" || table === "login_codes" || table === "auth_events" || table === "auth_challenges") {

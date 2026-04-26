@@ -352,3 +352,35 @@ export async function setConfig(db: D1Database, key: string, value: string): Pro
     .bind(key, value)
     .run();
 }
+
+export async function getAppConfig(
+  db: D1Database,
+  key: string,
+): Promise<string | null> {
+  if (!key.startsWith("app.")) throw new Error(`getAppConfig: key must start with app., got: ${key}`);
+  return getConfig(db, key);
+}
+
+export async function setAppConfig(
+  db: D1Database,
+  key: string,
+  value: string,
+  updatedBy: string | null,
+): Promise<void> {
+  if (!key.startsWith("app.")) throw new Error(`setAppConfig: key must start with app., got: ${key}`);
+  const now = Math.floor(Date.now() / 1000);
+  await db.batch([
+    db.prepare(`INSERT INTO config (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`)
+      .bind(key, value),
+    db.prepare(`INSERT INTO config_meta (k, updated_at, updated_by) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
+      .bind(key, now, updatedBy ?? null),
+  ]);
+}
+
+export async function deleteAppConfig(
+  db: D1Database,
+  key: string,
+): Promise<void> {
+  if (!key.startsWith("app.")) throw new Error(`deleteAppConfig: key must start with app., got: ${key}`);
+  await db.prepare(`DELETE FROM config WHERE k = ?`).bind(key).run();
+}
