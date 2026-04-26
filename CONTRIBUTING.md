@@ -17,8 +17,9 @@ npm run dev
 ```
 
 No Cloudflare account required for code changes. The emulator starts on
-`http://localhost:8787`. Use `.dev.vars` (copy from `.dev.vars.example`) to
-inject environment bindings locally.
+`http://localhost:8787`. Use `.dev.vars` (gitignored) to inject environment
+bindings locally. `.dev.vars` is **not** tracked by Git and does not appear
+on the Cloudflare deploy form — use it freely without deploy-form side effects.
 
 `wrangler deploy` is available for contributors testing deploy behavior against
 a real Cloudflare account, but it is not the documented operator path — operators
@@ -41,13 +42,21 @@ Both must pass before opening a PR.
 
 Cookies are HMAC-signed against `SESSION_SECRET`. A cookie minted in local dev will not validate against prod and vice versa — this is correct isolation, not a bug. Do not copy session cookies between environments.
 
-To set up locally:
+To set up locally, create `.dev.vars` (gitignored — safe to commit your local values here,
+they will never appear on the Cloudflare deploy form):
 
 ```
-cp .dev.vars.example .dev.vars
-# then edit .dev.vars and set:
+# .dev.vars — local dev only; gitignored
 SESSION_SECRET=any_32_byte_or_longer_string_for_local_testing
+# Optional — set to test email alerts locally:
+ALERT_FROM_ADDRESS=alerts@yourdomain.com
+# Optional — override the default webhook SSRF allowlist locally:
+WEBHOOK_HOST_ALLOWLIST=*.webhook.office.com,hooks.slack.com,discord.com,discordapp.com
 ```
+
+In production these two optional variables are configured from the worker dashboard
+**Settings → Config** tab (DB-stored, audit-logged). The env-var path remains as a
+bootstrap fallback: if no dashboard value is set, the worker reads the env var.
 
 ### WEBAUTHN_RP_ID
 
