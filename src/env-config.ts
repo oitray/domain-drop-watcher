@@ -1,17 +1,24 @@
 import type { Env } from "./types.js";
+import { getAppConfig } from "./db.js";
 
-const ALERT_FROM_KEY = "ALERT_FROM_ADDRESS";
-const WEBHOOK_ALLOWLIST_KEY = "WEBHOOK_HOST_ALLOWLIST";
-
-function readEnvString(env: Env, key: string): string | undefined {
-  const value = (env as unknown as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : undefined;
+function readEnvString(env: Env, key: "ALERT_FROM_ADDRESS" | "WEBHOOK_HOST_ALLOWLIST"): string | undefined {
+  const value = key === "ALERT_FROM_ADDRESS" ? env.ALERT_FROM_ADDRESS : env.WEBHOOK_HOST_ALLOWLIST;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-export function getAlertFromAddress(env: Env): string | undefined {
-  return readEnvString(env, ALERT_FROM_KEY);
+async function readConfigString(db: D1Database, key: string): Promise<string | undefined> {
+  const val = await getAppConfig(db, key);
+  return val && val.length > 0 ? val : undefined;
 }
 
-export function getWebhookHostAllowlist(env: Env): string | undefined {
-  return readEnvString(env, WEBHOOK_ALLOWLIST_KEY);
+export async function getAlertFromAddress(env: Env, db: D1Database): Promise<string | undefined> {
+  const dbVal = await readConfigString(db, "app.alert_from_address");
+  if (dbVal) return dbVal;
+  return readEnvString(env, "ALERT_FROM_ADDRESS");
+}
+
+export async function getWebhookHostAllowlist(env: Env, db: D1Database): Promise<string | undefined> {
+  const dbVal = await readConfigString(db, "app.webhook_host_allowlist");
+  if (dbVal) return dbVal;
+  return readEnvString(env, "WEBHOOK_HOST_ALLOWLIST");
 }

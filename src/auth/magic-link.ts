@@ -60,7 +60,7 @@ export async function issueLoginCode(
     .bind(hash, lower, now, expiresAt)
     .run();
 
-  const from = getAlertFromAddress(env) ?? "";
+  const from = await getAlertFromAddress(env, db) ?? "";
   const sendPromise = env.EMAIL!.send({
     from,
     to: lower,

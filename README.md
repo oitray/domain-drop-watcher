@@ -113,8 +113,7 @@ bootstrap cache.
 1. Click the button (on your fork, per the note above).
 2. Sign in to your Cloudflare account (or create a free one).
 3. Authorize the Cloudflare Workers Builds GitHub App to fork this repo into your GitHub account. See **What you're authorizing** below.
-4. Optionally fill in `ALERT_FROM_ADDRESS` as a Secret in the deploy form if you want email alerts (must be @ a domain with Cloudflare Email Routing enabled). Leave blank for Teams/Slack/Discord webhooks only. No other fields are required.
-5. Click Deploy. Cloudflare provisions a D1 database and two KV namespaces automatically. The `postdeploy` script applies `schema.sql` to the D1 database and generates your admin tokens — no manual step required.
+4. Click Deploy. No app-config fields are required — the deploy form asks only for bindings Cloudflare provisions automatically. Cloudflare provisions a D1 database and two KV namespaces automatically. The `postdeploy` script applies `schema.sql` to the D1 database and generates your admin tokens — no manual step required.
 6. Watch the build log stream in the Cloudflare dashboard. Near the end, the build script prints a banner containing your auto-generated admin token. Copy it.
 7. **Visit your Worker URL** — shown at the top of the Cloudflare dashboard's Worker page as `https://<name>.<account>.workers.dev`. That's your admin dashboard. Paste the token from step 6 into the login card to enter.
 
@@ -159,13 +158,11 @@ That is it. Roughly 90 seconds, browser-only.
 
 | Variable | Required | Notes |
 |----------|----------|-------|
-| `ALERT_FROM_ADDRESS` | No | Sender address for email alerts (e.g. `dropwatch@yourmsp.com`). Must be @ a domain you have enabled Cloudflare Email Routing on. Leave blank if you only need Teams/Slack/Discord webhooks. Required for email-code login. |
-| `WEBHOOK_HOST_ALLOWLIST` | No | Comma-separated hostname globs for the webhook SSRF allowlist. Defaults to Teams, Slack, and Discord. Override to restrict or extend. |
 | `WEBAUTHN_RP_ID` | No | Override the WebAuthn Relying Party ID. Defaults to the Worker's hostname. Set this if you deploy under a custom domain so passkey challenges bind to the correct origin. |
 
 `ADMIN_TOKEN` and `SESSION_SECRET` are not deploy-form fields. The build script generates both automatically and stores them as Cloudflare Secrets. You do not set them at deploy time.
 
-`ALERT_FROM_ADDRESS` and `WEBHOOK_HOST_ALLOWLIST` are also not deploy-form fields. Both have safe runtime defaults (no email alerts unless you set a sender; webhook allowlist defaults to Teams + Slack + Discord). To override either after deploy, go to Cloudflare dashboard → Workers & Pages → your worker → Settings → Variables and Secrets → Add Variable.
+`ALERT_FROM_ADDRESS` and `WEBHOOK_HOST_ALLOWLIST` are configured from the worker dashboard — **Settings → Config tab** — after first login. Both have safe defaults (no email alerts if sender is unset; webhook allowlist defaults to Teams + Slack + Discord). Env-var bootstrap is still supported: set either via `wrangler secret put` and the dashboard value will fall back to it until you set one in the UI.
 
 ### Email alerts via Cloudflare Email Routing (optional)
 
@@ -175,7 +172,7 @@ Email alerts use Cloudflare's native `send_email` binding — no external servic
 
 **2. Add your destination address(es).** In Email Routing → Destination Addresses → **Add destination address**. Enter where alerts should go (e.g. `tickets@yourmsp.com` or your PSA's inbox). CF emails a verification link to that address. Click it once.
 
-**3. Set `ALERT_FROM_ADDRESS`.** In the deploy form OR via Dashboard → Workers & Pages → your worker → Settings → Variables → Add Variable. Use any address @ the Email-Routing-enabled domain (e.g. `dropwatch@yourmsp.com`). This is the sender shown on alert emails.
+**3. Set `ALERT_FROM_ADDRESS`.** In the worker dashboard → **Settings → Config → Email Sender**. Use any address @ the Email-Routing-enabled domain (e.g. `dropwatch@yourmsp.com`). This is the sender shown on alert emails and required for magic-link login.
 
 **4. Add an email channel in the dashboard.** Channels tab → Add channel → type: email, target: your verified destination address. Done.
 
@@ -233,7 +230,7 @@ The admin dashboard is a vanilla-JS single-page app served by the Worker itself 
 - **Bulk add** — paste one FQDN per line, preview budget impact before committing
 - **Channels tab** — add/edit/disable email and webhook targets; test-send button; last delivery result
 - **Events tab** — rolling log of status transitions and alert sends
-- **Settings tab** — default cadence, webhook allowlist display, admin token rotation guidance
+- **Settings tab** — user/passkey/session management; **Config subtab** — editable Email Sender and Webhook Allowlist with validation + audit log; admin token rotation guidance
 
 The same surface is available via `curl` + documented endpoints. A small
 `scripts/cli.sh` wrapper provides `dropwatch add <fqdn>`, `dropwatch list`,
@@ -244,7 +241,7 @@ and `WORKER_URL` from env.
 
 | Channel | How | Notes |
 |---------|-----|-------|
-| Email | Cloudflare Email Routing `send_email` | Destination must be verified in Email Routing. Set `ALERT_FROM_ADDRESS` to a sender @ your Email-Routing-enabled domain. No API key, no DNS setup, no monthly cap. |
+| Email | Cloudflare Email Routing `send_email` | Destination must be verified in Email Routing. Set sender address in **Settings → Config → Email Sender** (or via `wrangler secret put ALERT_FROM_ADDRESS` as bootstrap). No API key, no DNS setup, no monthly cap. |
 | Microsoft Teams | Incoming webhook | Auto-detected via `*.webhook.office.com` host; formatted as MessageCard with `#e42e1b` accent. |
 | Slack | Incoming webhook | Auto-detected via `hooks.slack.com`; formatted as Block Kit blocks. |
 | Discord | Incoming webhook | Auto-detected via `discord.com/api/webhooks`; formatted as embed with `#e42e1b` color. |
@@ -361,18 +358,18 @@ tool uses an **allowlist-first** policy:
 **Subdomain wildcard caveat.** The default `*.webhook.office.com` glob trusts
 any Microsoft subdomain. A subdomain takeover at Microsoft's DNS could
 theoretically route alerts to an attacker. Operators with tighter threat models
-should narrow the glob (e.g., to their specific tenant subdomain). Update via:
+should narrow the glob (e.g., to their specific tenant subdomain). Update via
+the worker dashboard → **Settings → Config → Webhook Allowlist**:
 
 ```
-wrangler secret put WEBHOOK_HOST_ALLOWLIST
-# enter: yourtenant.webhook.office.com,hooks.slack.com,discord.com,discordapp.com
+yourtenant.webhook.office.com,hooks.slack.com,discord.com,discordapp.com
 ```
 
 **No self-rotating secrets.** The Worker runtime does not hold a Cloudflare
 control-plane token and cannot call the CF API to rotate its own secrets.
-Rotation is operator-driven via the Cloudflare dashboard: Workers → your worker
-→ Settings → Variables. The Settings tab in the admin dashboard surfaces clear
-instructions.
+`ADMIN_TOKEN` and `SESSION_SECRET` rotate via the Cloudflare dashboard: Workers → your worker
+→ Settings → Secrets. App config (`ALERT_FROM_ADDRESS`, `WEBHOOK_HOST_ALLOWLIST`) is managed
+from the worker dashboard → Settings → Config tab directly.
 
 ## FAQ
 

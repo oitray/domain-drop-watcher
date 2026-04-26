@@ -422,6 +422,55 @@
     </div>
 
     <div id="subtab-config" class="subtab-panel" style="display:none">
+
+      <div class="card" id="config-alert-from-card">
+        <div class="card-header">Email Sender</div>
+        <div class="card-body">
+          <details style="margin-bottom:12px; font-size:13px; color:var(--gray)">
+            <summary style="cursor:pointer; font-weight:500">Help</summary>
+            <div style="margin-top:8px; line-height:1.6">
+              Address email alerts come from. Must be @ a domain you&apos;ve enabled Cloudflare Email Routing
+              on (e.g. <code>dropwatch@yourmsp.com</code>). Leave blank to disable email alerts.
+              Required for magic-link login.
+            </div>
+          </details>
+          <div class="form-row" style="margin-bottom:8px">
+            <label for="config-alert-from-input" style="font-size:13px">Sender address</label>
+            <input type="email" id="config-alert-from-input" placeholder="dropwatch@yourmsp.com"
+              autocomplete="off" style="max-width:340px">
+          </div>
+          <div id="config-alert-from-effective" style="font-size:12px; color:var(--gray); margin-bottom:10px; min-height:1em"></div>
+          <div id="config-alert-from-error" class="notice notice-error" style="display:none; margin-bottom:8px" role="alert"></div>
+          <button class="btn btn-primary btn-sm" id="config-alert-from-save">Save</button>
+        </div>
+      </div>
+
+      <div class="card" id="config-allowlist-card">
+        <div class="card-header">Webhook Allowlist</div>
+        <div class="card-body">
+          <details style="margin-bottom:12px; font-size:13px; color:var(--gray)">
+            <summary style="cursor:pointer; font-weight:500">Help</summary>
+            <div style="margin-top:8px; line-height:1.6">
+              Comma-separated hostname globs for the webhook SSRF allowlist. Each entry is a hostname
+              only &mdash; no <code>://</code>, no spaces. Wildcards are supported (e.g.
+              <code>*.webhook.office.com</code>). Leave blank to use the built-in default:
+              Teams, Slack, and Discord.<br>
+              <small>Default: <code id="config-allowlist-default-display"></code></small>
+            </div>
+          </details>
+          <div class="form-row" style="margin-bottom:8px">
+            <label for="config-allowlist-input" style="font-size:13px">Allowlist (comma-separated hosts)</label>
+            <textarea id="config-allowlist-input" rows="3"
+              placeholder="*.webhook.office.com,hooks.slack.com,discord.com"
+              style="width:100%; max-width:480px; font-family:monospace; font-size:13px; resize:vertical"></textarea>
+          </div>
+          <div id="config-allowlist-preview" style="font-size:12px; color:var(--gray); margin-bottom:8px; min-height:1em"></div>
+          <div id="config-allowlist-effective" style="font-size:12px; color:var(--gray); margin-bottom:10px; min-height:1em"></div>
+          <div id="config-allowlist-error" class="notice notice-error" style="display:none; margin-bottom:8px" role="alert"></div>
+          <button class="btn btn-primary btn-sm" id="config-allowlist-save">Save</button>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">Admin Token (Break-glass)</div>
         <div class="card-body">
@@ -429,16 +478,6 @@
             Token rotation is managed via Wrangler CLI. Run: <code>wrangler secret put ADMIN_TOKEN</code>.
             Keep this set for lockout recovery.
           </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">Webhook Allowlist</div>
-        <div class="card-body">
-          <p style="font-size:13px; color:var(--gray); margin-bottom:10px">
-            Currently configured webhook hosts. Change via: <code>wrangler secret put WEBHOOK_HOST_ALLOWLIST</code>
-          </p>
-          <div id="allowlist-display" style="font-family:monospace; font-size:13px; line-height:1.8; color:var(--charcoal)">Loading&hellip;</div>
         </div>
       </div>
 
@@ -1080,6 +1119,110 @@ document.getElementById("revoke-all-sessions-btn").addEventListener("click", asy
   if (r.ok) { location.href = "/login"; }
   else { var b = await r.json(); alert("Failed: " + (b.error || "unknown")); }
 });
+
+/* ---- Config subtab ---- */
+var _configLoaded = false;
+
+async function loadConfigSubtab() {
+  if (_configLoaded) return;
+  _configLoaded = true;
+
+  var r = await apiJson("/config/app");
+  if (!r.ok) return;
+  var cfg = r.body;
+
+  var defaultAllowlist = (cfg.defaults && cfg.defaults.webhook_host_allowlist) || "";
+  var defDisplay = document.getElementById("config-allowlist-default-display");
+  if (defDisplay) defDisplay.textContent = defaultAllowlist;
+
+  var alertInput = document.getElementById("config-alert-from-input");
+  var alertEffective = document.getElementById("config-alert-from-effective");
+  if (alertInput) {
+    alertInput.value = cfg.alert_from_address || "";
+    if (alertEffective) {
+      alertEffective.textContent = cfg.alert_from_address
+        ? "Currently in use: " + cfg.alert_from_address
+        : "Unset — email alerts disabled";
+    }
+  }
+
+  var allowlistInput = document.getElementById("config-allowlist-input");
+  var allowlistEffective = document.getElementById("config-allowlist-effective");
+  if (allowlistInput) {
+    allowlistInput.value = cfg.webhook_host_allowlist || "";
+    if (allowlistEffective) {
+      allowlistEffective.textContent = cfg.webhook_host_allowlist
+        ? "Currently in use: " + cfg.webhook_host_allowlist
+        : "Unset — using built-in default: " + defaultAllowlist;
+    }
+  }
+
+  var allowlistPreview = document.getElementById("config-allowlist-preview");
+  if (allowlistInput && allowlistPreview) {
+    allowlistInput.addEventListener("input", function() {
+      var val = allowlistInput.value.trim();
+      if (!val) { allowlistPreview.textContent = ""; return; }
+      var entries = val.split(",").map(function(e) { return e.trim(); }).filter(function(e) { return e !== ""; });
+      allowlistPreview.textContent = "Parsed entries: " + entries.join(", ");
+    });
+  }
+
+  var alertSave = document.getElementById("config-alert-from-save");
+  var alertError = document.getElementById("config-alert-from-error");
+  if (alertSave && alertInput) {
+    alertSave.addEventListener("click", async function() {
+      alertError.style.display = "none";
+      alertSave.disabled = true;
+      var res = await apiJson("/config/app/alert_from_address", {
+        method: "PUT",
+        body: JSON.stringify({ value: alertInput.value }),
+      });
+      alertSave.disabled = false;
+      if (!res.ok) {
+        alertError.textContent = res.body.reason || res.body.error || "Save failed";
+        alertError.style.display = "";
+      } else {
+        var saved = res.body.value || "";
+        alertInput.value = saved;
+        if (alertEffective) {
+          alertEffective.textContent = saved
+            ? "Currently in use: " + saved
+            : "Unset — email alerts disabled";
+        }
+        announce("Email sender saved");
+        _configLoaded = false;
+      }
+    });
+  }
+
+  var allowlistSave = document.getElementById("config-allowlist-save");
+  var allowlistError = document.getElementById("config-allowlist-error");
+  if (allowlistSave && allowlistInput) {
+    allowlistSave.addEventListener("click", async function() {
+      allowlistError.style.display = "none";
+      allowlistSave.disabled = true;
+      var res = await apiJson("/config/app/webhook_host_allowlist", {
+        method: "PUT",
+        body: JSON.stringify({ value: allowlistInput.value }),
+      });
+      allowlistSave.disabled = false;
+      if (!res.ok) {
+        allowlistError.textContent = res.body.reason || res.body.error || "Save failed";
+        allowlistError.style.display = "";
+      } else {
+        var saved = res.body.value || "";
+        allowlistInput.value = saved;
+        if (allowlistEffective) {
+          allowlistEffective.textContent = saved
+            ? "Currently in use: " + saved
+            : "Unset — using built-in default: " + defaultAllowlist;
+        }
+        announce("Webhook allowlist saved");
+        _configLoaded = false;
+      }
+    });
+  }
+}
 
 /* ---- Settings entry point ---- */
 async function loadSettings() {

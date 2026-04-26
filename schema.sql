@@ -121,3 +121,12 @@ CREATE TABLE IF NOT EXISTS auth_challenges (
   purpose TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_auth_challenges_expires ON auth_challenges(expires_at);
+
+-- Audit metadata for app.* config keys. Companion to the config k/v table.
+-- Cascade-deletes when the config row is removed (empty-value PUT = DELETE).
+CREATE TABLE IF NOT EXISTS config_meta (
+  k TEXT PRIMARY KEY REFERENCES config(k) ON DELETE CASCADE,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_config_meta_updated_at ON config_meta(updated_at);

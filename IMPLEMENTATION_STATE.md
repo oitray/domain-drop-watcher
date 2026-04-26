@@ -63,6 +63,52 @@ Update these checkboxes as you complete work. Include commit SHA.
 
 _none yet_
 
+## Phase 13 — In-dashboard app config (branch: feat/868jd3n6k-dashboard-app-config)
+
+### Summary
+
+Moves `ALERT_FROM_ADDRESS` and `WEBHOOK_HOST_ALLOWLIST` out of the Cloudflare deploy form and into the worker's own dashboard. The deploy form now prompts for zero operator-managed config.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `schema.sql` | Added `config_meta` table (audit trail for `app.*` config keys) + index |
+| `src/db.ts` | Added `getAppConfig`, `setAppConfig`, `deleteAppConfig` helpers (key must start with `app.`) |
+| `src/env-config.ts` | Rewrote to async DB-first helpers; dropped dynamic-indexing shim; direct `env.X` access restored |
+| `src/admin.ts` | Added `handleGetAppConfig`, `handlePutAlertFromAddress`, `handlePutWebhookHostAllowlist`; all four call sites updated to `await` + `db` param |
+| `src/alerts.ts` | Updated two call sites to `await getAlertFromAddress/getWebhookHostAllowlist(ctx.env, ctx.env.DB)` |
+| `src/auth/magic-link.ts` | Updated one call site |
+| `public/index.html` | Implemented `loadConfigSubtab()`; replaced read-only Webhook Allowlist card with editable cards for both Email Sender and Webhook Allowlist |
+| `.dev.vars.example` | Deleted — this was the deploy-form trigger for Secret prompts |
+| `wrangler.json` | Removed empty `vars: {}` |
+| `package.json` | Added `cloudflare.bindings` block with markdown descriptions for `ADMIN_TOKEN` + `SESSION_SECRET` |
+| `CONTRIBUTING.md` | Updated local dev section — `.dev.vars` guidance, noted no deploy-form side effect |
+| `README.md` | Replaced deploy-form + Variables guidance with dashboard Config tab; updated security section |
+| `test/admin.test.ts` | Added `config_meta` to makeD1 mock; added 10 new tests for config routes |
+| `test/env-config.test.ts` | New file — 8 tests for DB-first/env-fallback precedence |
+
+### Architecture
+
+- `app.*` key namespace in the existing `config` k/v table; `config_meta` companion table holds `updated_at` + `updated_by`.
+- Read precedence: DB row → env var → undefined (caller decides default).
+- Empty-value PUT = DELETE row (revert to env/baked default).
+- Audit log: `auth_events` `event_type='config_updated'`, metadata carries `key`, `old_value_set`, `new_value_set` (raw values never logged).
+- Origin check on PUTs.
+
+### Test count
+
+Before: 198 (12 files). After: 216 (13 files — new `test/env-config.test.ts`).
+
+### Commit SHAs
+
+- Phase 1 (schema + db helpers): `df81e96`
+- Phase 2 (env-config async + call sites): `fa0cad5`
+- Phase 3 (admin routes + tests): `fd3982b`
+- Phase 4 (dashboard UI): `081fb1c`
+- Phase 5 (cleanup): `305094a`
+- Phase 6 (docs): `14f4e5b`
+
 ## Phase 12 — Multi-user auth (shipped, branch: feat/868jd3n6k-magic-link-passkey-auth)
 
 ### Schema

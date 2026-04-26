@@ -15,6 +15,9 @@ import {
   unlinkChannel,
   getConfig,
   setConfig,
+  getAppConfig,
+  setAppConfig,
+  deleteAppConfig,
 } from "./db.js";
 import { listEvents } from "./kv.js";
 import { computeBudget, pickLeastLoadedOffset } from "./budget.js";
@@ -583,7 +586,7 @@ async function handlePostChannel(req: Request, env: Env): Promise<Response> {
     if (resolvedType === "email" && !EMAIL_RE.test(target)) {
       errors.push("target: invalid email address");
     } else if (resolvedType.startsWith("webhook")) {
-      const allowlist = parseAllowlist(getWebhookHostAllowlist(env));
+      const allowlist = parseAllowlist(await getWebhookHostAllowlist(env, env.DB));
       const check = isWebhookAllowed(target, allowlist);
       if (!check.allowed) {
         errors.push(`target: webhook host not in allowlist (${check.reason ?? "not-allowed"})`);
@@ -631,7 +634,7 @@ async function handlePatchChannel(id: string, req: Request, env: Env): Promise<R
       if (channel.type === "email" && !EMAIL_RE.test(newTarget)) {
         errors.push("target: invalid email address");
       } else if (channel.type.startsWith("webhook")) {
-        const allowlist = parseAllowlist(getWebhookHostAllowlist(env));
+        const allowlist = parseAllowlist(await getWebhookHostAllowlist(env, env.DB));
         const check = isWebhookAllowed(newTarget, allowlist);
         if (!check.allowed) errors.push(`target: webhook host not in allowlist (${check.reason ?? "not-allowed"})`);
       }
@@ -723,6 +726,193 @@ async function handleGetEvents(req: Request, env: Env): Promise<Response> {
   const limit = limitRaw ? Math.min(parseInt(limitRaw, 10) || 20, 200) : 20;
   const events = await listEvents(env.EVENTS, { fqdn, limit });
   return json(events);
+}
+
+// ---------------------------------------------------------------------------
+// App config validation
+// ---------------------------------------------------------------------------
+
+const APP_ALERT_FROM_RE = /^[^@]+@[^@]+\.[^@]+$/;
+
+function validateAlertFromAddress(value: string): { ok: true } | { ok: false; reason: string } {
+  if (!APP_ALERT_FROM_RE.test(value)) return { ok: false, reason: "invalid_email" };
+  return { ok: true };
+}
+
+function validateWebhookHostAllowlist(value: string): { ok: true } | { ok: false; reason: string } {
+  const entries = value.split(",");
+  for (const raw of entries) {
+    const entry = raw.trim();
+    if (entry === "") return { ok: false, reason: "empty_entry" };
+    if (entry.includes("://")) return { ok: false, reason: "entry_must_not_contain_scheme" };
+    if (/\s/.test(entry)) return { ok: false, reason: "entry_must_not_contain_whitespace" };
+  }
+  return { ok: true };
+}
+
+function checkOrigin(req: Request): boolean {
+  const origin = req.headers.get("origin");
+  if (!origin) return true;
+  const url = new URL(req.url);
+  return origin === url.origin;
+}
+
+// ---------------------------------------------------------------------------
+// GET /config/app
+// ---------------------------------------------------------------------------
+
+async function handleGetAppConfig(env: Env, db: D1Database): Promise<Response> {
+  const [alertFrom, allowlist] = await Promise.all([
+    getAppConfig(db, "app.alert_from_address"),
+    getAppConfig(db, "app.webhook_host_allowlist"),
+  ]);
+  return json({
+    alert_from_address: alertFrom ?? null,
+    webhook_host_allowlist: allowlist ?? null,
+    defaults: {
+      webhook_host_allowlist: "*.webhook.office.com,hooks.slack.com,discord.com,discordapp.com",
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// PUT /config/app/alert_from_address
+// ---------------------------------------------------------------------------
+
+async function handlePutAlertFromAddress(
+  req: Request,
+  env: Env,
+  db: D1Database,
+  identity: AuthIdentity,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (!checkOrigin(req)) return jsonErr(403, "forbidden");
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return jsonErr(400, "validation_failed", { details: ["body: invalid JSON"] });
+  }
+
+  const rawValue = body["value"];
+  if (typeof rawValue !== "string") {
+    return jsonErr(400, "validation_failed", { details: ["value: must be string"] });
+  }
+
+  const trimmed = rawValue.trim();
+  const oldRow = await getAppConfig(db, "app.alert_from_address");
+
+  if (trimmed === "") {
+    await deleteAppConfig(db, "app.alert_from_address");
+    ctx.waitUntil(
+      logAuthEvent(db, {
+        email: identity.email,
+        event_type: "config_updated",
+        auth_method: identity.method,
+        ip_address: req.headers.get("CF-Connecting-IP"),
+        user_agent: req.headers.get("User-Agent"),
+        metadata: JSON.stringify({
+          key: "app.alert_from_address",
+          old_value_set: oldRow !== null,
+          new_value_set: false,
+        }),
+      }),
+    );
+    return json({ ok: true, value: null });
+  }
+
+  const validation = validateAlertFromAddress(trimmed);
+  if (!validation.ok) {
+    return jsonErr(400, "validation_failed", { reason: validation.reason });
+  }
+
+  await setAppConfig(db, "app.alert_from_address", trimmed, identity.email);
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: identity.email,
+      event_type: "config_updated",
+      auth_method: identity.method,
+      ip_address: req.headers.get("CF-Connecting-IP"),
+      user_agent: req.headers.get("User-Agent"),
+      metadata: JSON.stringify({
+        key: "app.alert_from_address",
+        old_value_set: oldRow !== null,
+        new_value_set: true,
+      }),
+    }),
+  );
+  return json({ ok: true, value: trimmed });
+}
+
+// ---------------------------------------------------------------------------
+// PUT /config/app/webhook_host_allowlist
+// ---------------------------------------------------------------------------
+
+async function handlePutWebhookHostAllowlist(
+  req: Request,
+  env: Env,
+  db: D1Database,
+  identity: AuthIdentity,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (!checkOrigin(req)) return jsonErr(403, "forbidden");
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return jsonErr(400, "validation_failed", { details: ["body: invalid JSON"] });
+  }
+
+  const rawValue = body["value"];
+  if (typeof rawValue !== "string") {
+    return jsonErr(400, "validation_failed", { details: ["value: must be string"] });
+  }
+
+  const trimmed = rawValue.trim();
+  const oldRow = await getAppConfig(db, "app.webhook_host_allowlist");
+
+  if (trimmed === "") {
+    await deleteAppConfig(db, "app.webhook_host_allowlist");
+    ctx.waitUntil(
+      logAuthEvent(db, {
+        email: identity.email,
+        event_type: "config_updated",
+        auth_method: identity.method,
+        ip_address: req.headers.get("CF-Connecting-IP"),
+        user_agent: req.headers.get("User-Agent"),
+        metadata: JSON.stringify({
+          key: "app.webhook_host_allowlist",
+          old_value_set: oldRow !== null,
+          new_value_set: false,
+        }),
+      }),
+    );
+    return json({ ok: true, value: null });
+  }
+
+  const validation = validateWebhookHostAllowlist(trimmed);
+  if (!validation.ok) {
+    return jsonErr(400, "validation_failed", { reason: validation.reason });
+  }
+
+  await setAppConfig(db, "app.webhook_host_allowlist", trimmed, identity.email);
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: identity.email,
+      event_type: "config_updated",
+      auth_method: identity.method,
+      ip_address: req.headers.get("CF-Connecting-IP"),
+      user_agent: req.headers.get("User-Agent"),
+      metadata: JSON.stringify({
+        key: "app.webhook_host_allowlist",
+        old_value_set: oldRow !== null,
+        new_value_set: true,
+      }),
+    }),
+  );
+  return json({ ok: true, value: trimmed });
 }
 
 // ---------------------------------------------------------------------------
@@ -1601,7 +1791,7 @@ async function handleAuthHealth(env: Env, db: D1Database): Promise<Response> {
   const count = await userCount(db);
   return json({
     email_routing_bound: env.EMAIL !== undefined,
-    alert_from_set: !!getAlertFromAddress(env),
+    alert_from_set: !!(await getAlertFromAddress(env, db)),
     session_secret_set: !!env.SESSION_SECRET,
     admin_token_set: !!resolveAdminToken(env),
     allowlist_size: count,
@@ -1804,6 +1994,16 @@ export async function handleAdmin(
 
   if (pathname === "/budget" && method === "GET") return handleGetBudget(req, env);
   if (pathname === "/events" && method === "GET") return handleGetEvents(req, env);
+
+  if (pathname === "/config/app" && method === "GET") {
+    return handleGetAppConfig(env, env.DB);
+  }
+  if (pathname === "/config/app/alert_from_address" && method === "PUT") {
+    return handlePutAlertFromAddress(req, env, env.DB, identity, ctx);
+  }
+  if (pathname === "/config/app/webhook_host_allowlist" && method === "PUT") {
+    return handlePutWebhookHostAllowlist(req, env, env.DB, identity, ctx);
+  }
 
   return jsonErr(404, "not_found");
 }

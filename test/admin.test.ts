@@ -12,7 +12,7 @@ interface Row {
   [key: string]: unknown;
 }
 
-type CoreTableName = "domains" | "channels" | "domain_channels" | "config";
+type CoreTableName = "domains" | "channels" | "domain_channels" | "config" | "config_meta";
 type AuthTableName = "users" | "sessions" | "login_codes" | "login_attempts" | "auth_events" | "auth_challenges" | "passkeys";
 type TableName = CoreTableName | AuthTableName;
 
@@ -22,6 +22,7 @@ function makeD1(seed?: { [table in CoreTableName]?: Row[] }): D1Database {
     channels: seed?.channels ?? [],
     domain_channels: seed?.domain_channels ?? [],
     config: seed?.config ?? [],
+    config_meta: seed?.config_meta ?? [],
     users: [],
     sessions: [],
     login_codes: [],
@@ -36,6 +37,7 @@ function makeD1(seed?: { [table in CoreTableName]?: Row[] }): D1Database {
     if (lower.includes("from domains") || lower.includes("into domains") || lower.includes("update domains") || lower.includes("delete from domains")) return "domains";
     if (lower.includes("from channels") || lower.includes("into channels") || lower.includes("update channels") || lower.includes("delete from channels")) return "channels";
     if (lower.includes("from domain_channels") || lower.includes("into domain_channels") || lower.includes("delete from domain_channels")) return "domain_channels";
+    if (lower.includes("from config_meta") || lower.includes("into config_meta") || lower.includes("update config_meta") || lower.includes("delete from config_meta")) return "config_meta";
     if (lower.includes("from config") || lower.includes("into config") || lower.includes("update config")) return "config";
     if (lower.includes("from users") || lower.includes("into users") || lower.includes("update users") || lower.includes("delete from users")) return "users";
     if (lower.includes("from sessions") || lower.includes("into sessions") || lower.includes("update sessions") || lower.includes("delete from sessions")) return "sessions";
@@ -210,6 +212,19 @@ function makeD1(seed?: { [table in CoreTableName]?: Row[] }): D1Database {
           tables.config[idx] = { k, v };
         } else {
           tables.config.push({ k, v });
+        }
+        return { results: [], changes: 1, last_row_id: 0 };
+      }
+
+      if (table === "config_meta" && lower.includes("on conflict")) {
+        const k = bindings[0] as string;
+        const updated_at = bindings[1] as number;
+        const updated_by = bindings[2] as string | null;
+        const idx = tables.config_meta.findIndex((r) => r["k"] === k);
+        if (idx >= 0) {
+          tables.config_meta[idx] = { k, updated_at, updated_by: updated_by ?? null };
+        } else {
+          tables.config_meta.push({ k, updated_at, updated_by: updated_by ?? null });
         }
         return { results: [], changes: 1, last_row_id: 0 };
       }
@@ -512,6 +527,21 @@ function makeD1(seed?: { [table in CoreTableName]?: Row[] }): D1Database {
         const before = tables.domain_channels.length;
         tables.domain_channels = tables.domain_channels.filter((r) => r["channel_id"] !== chId);
         return { results: [], changes: before - tables.domain_channels.length, last_row_id: 0 };
+      }
+
+      if (table === "config") {
+        const k = bindings[0] as string;
+        const before = tables.config.length;
+        tables.config = tables.config.filter((r) => r["k"] !== k);
+        tables.config_meta = tables.config_meta.filter((r) => r["k"] !== k);
+        return { results: [], changes: before - tables.config.length, last_row_id: 0 };
+      }
+
+      if (table === "config_meta") {
+        const k = bindings[0] as string;
+        const before = tables.config_meta.length;
+        tables.config_meta = tables.config_meta.filter((r) => r["k"] !== k);
+        return { results: [], changes: before - tables.config_meta.length, last_row_id: 0 };
       }
 
       if (table === "login_attempts" || table === "login_codes" || table === "auth_events" || table === "auth_challenges") {
@@ -1524,5 +1554,184 @@ describe("GET /auth/empty-allowlist-status", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { empty: boolean };
     expect(body.empty).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /config/app + PUT /config/app/alert_from_address + webhook_host_allowlist
+// ---------------------------------------------------------------------------
+
+describe("GET /config/app", () => {
+  it("returns null values and defaults when no config rows exist", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(authReq("/config/app"), env, NOOP_CTX);
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      alert_from_address: string | null;
+      webhook_host_allowlist: string | null;
+      defaults: { webhook_host_allowlist: string };
+    };
+    expect(body.alert_from_address).toBeNull();
+    expect(body.webhook_host_allowlist).toBeNull();
+    expect(typeof body.defaults.webhook_host_allowlist).toBe("string");
+    expect(body.defaults.webhook_host_allowlist.length).toBeGreaterThan(0);
+  });
+
+  it("returns stored values after PUT", async () => {
+    const env = makeEnv();
+    await handleAdmin(
+      authReq("/config/app/alert_from_address", {
+        method: "PUT",
+        body: JSON.stringify({ value: "saved@example.com" }),
+      }),
+      env,
+      NOOP_CTX,
+    );
+    const res = await handleAdmin(authReq("/config/app"), env, NOOP_CTX);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { alert_from_address: string | null };
+    expect(body.alert_from_address).toBe("saved@example.com");
+  });
+
+  it("returns 401 without auth", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(noAuthReq("/config/app"), env, NOOP_CTX);
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("PUT /config/app/alert_from_address", () => {
+  it("stores a valid email and returns {ok:true, value}", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(
+      authReq("/config/app/alert_from_address", {
+        method: "PUT",
+        body: JSON.stringify({ value: "alerts@example.com" }),
+      }),
+      env,
+      NOOP_CTX,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; value: string };
+    expect(body.ok).toBe(true);
+    expect(body.value).toBe("alerts@example.com");
+  });
+
+  it("rejects invalid email with 400 and reason:invalid_email", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(
+      authReq("/config/app/alert_from_address", {
+        method: "PUT",
+        body: JSON.stringify({ value: "not-an-email" }),
+      }),
+      env,
+      NOOP_CTX,
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json() as { reason: string };
+    expect(body.reason).toBe("invalid_email");
+  });
+
+  it("empty value deletes the row and returns {ok:true, value:null}", async () => {
+    const env = makeEnv();
+    await handleAdmin(
+      authReq("/config/app/alert_from_address", {
+        method: "PUT",
+        body: JSON.stringify({ value: "first@example.com" }),
+      }),
+      env,
+      NOOP_CTX,
+    );
+    const res = await handleAdmin(
+      authReq("/config/app/alert_from_address", {
+        method: "PUT",
+        body: JSON.stringify({ value: "" }),
+      }),
+      env,
+      NOOP_CTX,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; value: null };
+    expect(body.ok).toBe(true);
+    expect(body.value).toBeNull();
+
+    const get = await handleAdmin(authReq("/config/app"), env, NOOP_CTX);
+    const getBody = await get.json() as { alert_from_address: null };
+    expect(getBody.alert_from_address).toBeNull();
+  });
+
+  it("writes a config_updated auth_event row on successful PUT", async () => {
+    const env = makeEnv();
+    await handleAdmin(
+      authReq("/config/app/alert_from_address", {
+        method: "PUT",
+        body: JSON.stringify({ value: "audit@example.com" }),
+      }),
+      env,
+      NOOP_CTX,
+    );
+    const db = env.DB as unknown as { _tables: { auth_events: { event_type: string; metadata: string }[] } };
+    const row = db._tables.auth_events.find((r) => r.event_type === "config_updated");
+    expect(row).toBeDefined();
+    const meta = JSON.parse(row!.metadata);
+    expect(meta.key).toBe("app.alert_from_address");
+    expect(meta.new_value_set).toBe(true);
+  });
+});
+
+describe("PUT /config/app/webhook_host_allowlist", () => {
+  it("stores a valid allowlist", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(
+      authReq("/config/app/webhook_host_allowlist", {
+        method: "PUT",
+        body: JSON.stringify({ value: "foo.example.com,bar.example.com" }),
+      }),
+      env,
+      NOOP_CTX,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; value: string };
+    expect(body.ok).toBe(true);
+    expect(body.value).toBe("foo.example.com,bar.example.com");
+  });
+
+  it("rejects entry containing :// with 400", async () => {
+    const env = makeEnv();
+    const res = await handleAdmin(
+      authReq("/config/app/webhook_host_allowlist", {
+        method: "PUT",
+        body: JSON.stringify({ value: "https://foo.example.com" }),
+      }),
+      env,
+      NOOP_CTX,
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json() as { reason: string };
+    expect(body.reason).toBe("entry_must_not_contain_scheme");
+  });
+
+  it("empty value deletes the row", async () => {
+    const env = makeEnv();
+    await handleAdmin(
+      authReq("/config/app/webhook_host_allowlist", {
+        method: "PUT",
+        body: JSON.stringify({ value: "foo.example.com" }),
+      }),
+      env,
+      NOOP_CTX,
+    );
+    const res = await handleAdmin(
+      authReq("/config/app/webhook_host_allowlist", {
+        method: "PUT",
+        body: JSON.stringify({ value: "" }),
+      }),
+      env,
+      NOOP_CTX,
+    );
+    expect(res.status).toBe(200);
+    const get = await handleAdmin(authReq("/config/app"), env, NOOP_CTX);
+    const getBody = await get.json() as { webhook_host_allowlist: null };
+    expect(getBody.webhook_host_allowlist).toBeNull();
   });
 });
