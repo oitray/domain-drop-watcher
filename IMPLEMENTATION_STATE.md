@@ -107,7 +107,7 @@ Before: 198 (12 files). After: 216 (13 files — new `test/env-config.test.ts`).
 - Phase 3 (admin routes + tests): `fd3982b`
 - Phase 4 (dashboard UI): `081fb1c`
 - Phase 5 (cleanup): `305094a`
-- Phase 6 (docs): TBD
+- Phase 6 (docs): `14f4e5b`
 
 ## Phase 12 — Multi-user auth (shipped, branch: feat/868jd3n6k-magic-link-passkey-auth)
 
