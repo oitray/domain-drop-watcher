@@ -165,6 +165,8 @@ That is it. Roughly 90 seconds, browser-only.
 
 `ADMIN_TOKEN` and `SESSION_SECRET` are not deploy-form fields. The build script generates both automatically and stores them as Cloudflare Secrets. You do not set them at deploy time.
 
+`ALERT_FROM_ADDRESS` and `WEBHOOK_HOST_ALLOWLIST` are also not deploy-form fields. Both have safe runtime defaults (no email alerts unless you set a sender; webhook allowlist defaults to Teams + Slack + Discord). To override either after deploy, go to Cloudflare dashboard → Workers & Pages → your worker → Settings → Variables and Secrets → Add Variable.
+
 ### Email alerts via Cloudflare Email Routing (optional)
 
 Email alerts use Cloudflare's native `send_email` binding — no external service, no API key, no DNS required beyond enabling Email Routing on a domain you already control.

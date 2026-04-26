@@ -1,5 +1,6 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import type { Env } from "../types.js";
+import { getAlertFromAddress } from "../env-config.js";
 
 export function generateLoginCode(): string {
   const LIMIT = 4_294_967_000;
@@ -59,7 +60,7 @@ export async function issueLoginCode(
     .bind(hash, lower, now, expiresAt)
     .run();
 
-  const from = env.ALERT_FROM_ADDRESS ?? "";
+  const from = getAlertFromAddress(env) ?? "";
   const sendPromise = env.EMAIL!.send({
     from,
     to: lower,

@@ -1,5 +1,6 @@
 import type { ChannelRow, DomainRow, Env, AlertTransition } from "./types.js";
 import { isWebhookAllowed, parseAllowlist } from "./webhooks.js";
+import { getAlertFromAddress, getWebhookHostAllowlist } from "./env-config.js";
 import { recordChannelDelivery } from "./db.js";
 
 export interface AlertContext {
@@ -175,7 +176,7 @@ export async function dispatchAlert(
 
       if (channel.type === "email") {
         const emailBinding = ctx.env.EMAIL;
-        const fromAddress = ctx.env.ALERT_FROM_ADDRESS;
+        const fromAddress = getAlertFromAddress(ctx.env);
         if (!emailBinding || !fromAddress) {
           result = { channelId: channel.id, ok: false, error: "email-not-configured" };
         } else {
@@ -188,7 +189,7 @@ export async function dispatchAlert(
           }
         }
       } else {
-        const allowlist = parseAllowlist(ctx.env.WEBHOOK_HOST_ALLOWLIST);
+        const allowlist = parseAllowlist(getWebhookHostAllowlist(ctx.env));
         const check = isWebhookAllowed(channel.target, allowlist);
         if (!check.allowed) {
           result = { channelId: channel.id, ok: false, error: `not-allowed:${check.reason ?? "unknown"}` };
