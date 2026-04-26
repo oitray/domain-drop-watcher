@@ -176,7 +176,7 @@ export async function dispatchAlert(
 
       if (channel.type === "email") {
         const emailBinding = ctx.env.EMAIL;
-        const fromAddress = getAlertFromAddress(ctx.env);
+        const fromAddress = await getAlertFromAddress(ctx.env, ctx.env.DB);
         if (!emailBinding || !fromAddress) {
           result = { channelId: channel.id, ok: false, error: "email-not-configured" };
         } else {
@@ -189,7 +189,7 @@ export async function dispatchAlert(
           }
         }
       } else {
-        const allowlist = parseAllowlist(getWebhookHostAllowlist(ctx.env));
+        const allowlist = parseAllowlist(await getWebhookHostAllowlist(ctx.env, ctx.env.DB));
         const check = isWebhookAllowed(channel.target, allowlist);
         if (!check.allowed) {
           result = { channelId: channel.id, ok: false, error: `not-allowed:${check.reason ?? "unknown"}` };

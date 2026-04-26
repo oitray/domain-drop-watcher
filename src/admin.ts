@@ -583,7 +583,7 @@ async function handlePostChannel(req: Request, env: Env): Promise<Response> {
     if (resolvedType === "email" && !EMAIL_RE.test(target)) {
       errors.push("target: invalid email address");
     } else if (resolvedType.startsWith("webhook")) {
-      const allowlist = parseAllowlist(getWebhookHostAllowlist(env));
+      const allowlist = parseAllowlist(await getWebhookHostAllowlist(env, env.DB));
       const check = isWebhookAllowed(target, allowlist);
       if (!check.allowed) {
         errors.push(`target: webhook host not in allowlist (${check.reason ?? "not-allowed"})`);
@@ -631,7 +631,7 @@ async function handlePatchChannel(id: string, req: Request, env: Env): Promise<R
       if (channel.type === "email" && !EMAIL_RE.test(newTarget)) {
         errors.push("target: invalid email address");
       } else if (channel.type.startsWith("webhook")) {
-        const allowlist = parseAllowlist(getWebhookHostAllowlist(env));
+        const allowlist = parseAllowlist(await getWebhookHostAllowlist(env, env.DB));
         const check = isWebhookAllowed(newTarget, allowlist);
         if (!check.allowed) errors.push(`target: webhook host not in allowlist (${check.reason ?? "not-allowed"})`);
       }
@@ -1601,7 +1601,7 @@ async function handleAuthHealth(env: Env, db: D1Database): Promise<Response> {
   const count = await userCount(db);
   return json({
     email_routing_bound: env.EMAIL !== undefined,
-    alert_from_set: !!getAlertFromAddress(env),
+    alert_from_set: !!(await getAlertFromAddress(env, db)),
     session_secret_set: !!env.SESSION_SECRET,
     admin_token_set: !!resolveAdminToken(env),
     allowlist_size: count,
