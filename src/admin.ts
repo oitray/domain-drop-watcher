@@ -930,7 +930,7 @@ async function handlePutWebhookHostAllowlist(
 
 async function handleGetLogin(env: Env, db: D1Database): Promise<Response> {
   const count = await userCount(db);
-  const demoMode = (env as Record<string, unknown>)["DEMO_MODE"] === "1";
+  const demoMode = env.DEMO_MODE === "1";
   const emptyAllowlist = count === 0;
   const bannerHtml = emptyAllowlist
     ? `<div class="banner banner-warning">No users configured yet. Use your ADMIN_TOKEN below to log in and add the first user.</div>`
@@ -1328,8 +1328,8 @@ async function handlePostLoginAdminToken(
 
   let email = rawEmail.toLowerCase();
   if (!email || !email.includes("@")) {
-    const demoMode = (env as Record<string, unknown>)["DEMO_MODE"] === "1";
-    const fallback = (env as Record<string, unknown>)["DEMO_ADMIN_EMAIL"];
+    const demoMode = env.DEMO_MODE === "1";
+    const fallback = env.DEMO_ADMIN_EMAIL;
     if (demoMode && typeof fallback === "string" && fallback.includes("@")) {
       email = fallback.toLowerCase();
     } else {
@@ -2129,7 +2129,7 @@ export async function handleAdmin(
   }
 
   const identity = await authenticate(req, env, env.DB);
-  const demoMode = (env as Record<string, unknown>)["DEMO_MODE"] === "1";
+  const demoMode = env.DEMO_MODE === "1";
 
   const DEMO_GUEST_PATHS = new Set([
     "/domains", "/channels", "/events", "/budget", "/config/app",
