@@ -16,10 +16,10 @@ export default defineConfig({
       timeout: 10_000,
     },
     {
-      command: "npx wrangler dev --port 8787 --var EMAIL_STUB:1 --var RDAP_BASE_URL:http://127.0.0.1:9999",
+      command: "bash playwright-tests/fixtures/start-dev.sh",
       url: "http://127.0.0.1:8787",
       reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
+      timeout: 90_000,
     },
   ],
 });

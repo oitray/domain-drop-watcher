@@ -1897,6 +1897,40 @@ export async function handleAdmin(
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Test-only endpoints — only reachable when EMAIL_STUB === "1"
+  // These must never be reachable in production.
+  // ---------------------------------------------------------------------------
+
+  if (env.EMAIL_STUB === "1" && pathname === "/api/test/peek-code" && method === "GET") {
+    const email = url.searchParams.get("email");
+    if (!email) return jsonErr(400, "email_required");
+    const code = await env.BOOTSTRAP.get(`stub-code:${email.toLowerCase()}`);
+    return new Response(JSON.stringify({ code }), { headers: { "content-type": "application/json" } });
+  }
+
+  if (env.EMAIL_STUB === "1" && pathname === "/api/test/seed-user" && method === "POST") {
+    let body: Record<string, unknown>;
+    try {
+      body = (await req.json()) as Record<string, unknown>;
+    } catch {
+      return jsonErr(400, "invalid_json");
+    }
+    const email = typeof body["email"] === "string" ? body["email"].trim().toLowerCase() : "";
+    if (!email) return jsonErr(400, "email_required");
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO users (email, user_id, added_at, last_login_at, disabled, role) VALUES (?, ?, ?, NULL, 0, ?)",
+    ).bind(email, crypto.randomUUID(), now, "admin").run();
+    return new Response(JSON.stringify({ ok: true, email }), { headers: { "content-type": "application/json" } });
+  }
+
+  if (env.EMAIL_STUB === "1" && pathname === "/api/test/run-cron" && method === "POST") {
+    const { runScheduledTick } = await import("./tick.js");
+    await runScheduledTick(env);
+    return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+  }
+
   const identity = await authenticate(req, env, env.DB);
 
   if (!identity) {
