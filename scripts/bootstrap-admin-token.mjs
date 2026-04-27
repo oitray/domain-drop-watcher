@@ -1,16 +1,24 @@
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import fs from 'node:fs'
 
-const WORKER_NAME = 'domain-drop-watcher'
 const SECRET_NAME = 'ADMIN_TOKEN'
 const SESSION_SECRET_NAME = 'SESSION_SECRET'
 
-function checkSecretExists(workerName, secretName, runExecFileSync) {
+function resolveWorkerName(args, readFileFn) {
+  const envIdx = args.indexOf('--env')
+  if (envIdx === -1) return 'domain-drop-watcher'
+  const envName = args[envIdx + 1]
+  const wrangler = JSON.parse(readFileFn('wrangler.json', 'utf8'))
+  return wrangler.env?.[envName]?.name || `domain-drop-watcher-${envName}`
+}
+
+function checkSecretExists(workerName, secretName, runExecFileSync, envFlag) {
   let output
   try {
     output = runExecFileSync(
       'wrangler',
-      ['secret', 'list', '--name', workerName, '--format', 'json'],
+      ['secret', 'list', '--name', workerName, '--format', 'json', ...envFlag],
       { encoding: 'utf8' }
     )
   } catch (err) {
@@ -42,9 +50,15 @@ function checkSecretExists(workerName, secretName, runExecFileSync) {
 export async function main(deps) {
   const runExecFileSync = deps?.execFileSync ?? execFileSync
   const genBytes = deps?.randomBytes ?? randomBytes
+  const readFileFn = deps?.readFileSync ?? fs.readFileSync
 
-  const adminTokenExists = checkSecretExists(WORKER_NAME, SECRET_NAME, runExecFileSync)
-  const sessionSecretExists = checkSecretExists(WORKER_NAME, SESSION_SECRET_NAME, runExecFileSync)
+  const args = deps?.args ?? process.argv.slice(2)
+  const WORKER_NAME = resolveWorkerName(args, readFileFn)
+  const envIdx = args.indexOf('--env')
+  const ENV_FLAG = envIdx !== -1 ? ['--env', args[envIdx + 1]] : []
+
+  const adminTokenExists = checkSecretExists(WORKER_NAME, SECRET_NAME, runExecFileSync, ENV_FLAG)
+  const sessionSecretExists = checkSecretExists(WORKER_NAME, SESSION_SECRET_NAME, runExecFileSync, ENV_FLAG)
 
   if (adminTokenExists && sessionSecretExists) {
     process.stdout.write(
@@ -61,7 +75,7 @@ export async function main(deps) {
     adminToken = genBytes(32).toString('base64url')
     runExecFileSync(
       'wrangler',
-      ['secret', 'put', SECRET_NAME, '--name', WORKER_NAME],
+      ['secret', 'put', SECRET_NAME, '--name', WORKER_NAME, ...ENV_FLAG],
       { input: adminToken, encoding: 'utf8' }
     )
   } else {
@@ -74,7 +88,7 @@ export async function main(deps) {
     sessionSecret = genBytes(32).toString('base64url')
     runExecFileSync(
       'wrangler',
-      ['secret', 'put', SESSION_SECRET_NAME, '--name', WORKER_NAME],
+      ['secret', 'put', SESSION_SECRET_NAME, '--name', WORKER_NAME, ...ENV_FLAG],
       { input: sessionSecret, encoding: 'utf8' }
     )
   } else {

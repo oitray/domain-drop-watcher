@@ -4,10 +4,13 @@ const BASE64URL_43_RE = /^[A-Za-z0-9_-]{43}$/
 
 type ExecFileSyncFn = (cmd: string, args: string[], opts?: { encoding?: string; input?: string }) => string
 type RandomBytesFn = (n: number) => { toString: (enc: string) => string }
+type ReadFileSyncFn = (path: string, encoding: string) => string
 
 interface BootstrapDeps {
   execFileSync: ExecFileSyncFn
   randomBytes?: RandomBytesFn
+  args?: string[]
+  readFileSync?: ReadFileSyncFn
 }
 
 type MainFn = (deps?: BootstrapDeps) => Promise<void>
@@ -170,5 +173,68 @@ describe('bootstrap-admin-token.mjs main()', () => {
     expect(capturedPuts.length).toBe(1)
     expect(capturedPuts[0]!.name).toBe('SESSION_SECRET')
     expect(BASE64URL_43_RE.test(capturedPuts[0]!.input)).toBe(true)
+  })
+
+  it('resolves worker name from wrangler.json env block when --env demo is passed', async () => {
+    const main = await getMain()
+    const listJson = JSON.stringify([])
+    const mockExec = makeExecFileSync(listJson)
+
+    const mockWrangler = JSON.stringify({
+      name: 'domain-drop-watcher',
+      env: { demo: { name: 'domain-drop-watcher-demo' } }
+    })
+    const mockReadFileSync: ReadFileSyncFn = () => mockWrangler
+
+    await main({ execFileSync: mockExec, args: ['--env', 'demo'], readFileSync: mockReadFileSync })
+
+    const allCalls = mockExec.calls
+    for (const [, args] of allCalls) {
+      expect(args).toContain('--env')
+      const envIdx = args.indexOf('--env')
+      expect(args[envIdx + 1]).toBe('demo')
+      expect(args).toContain('domain-drop-watcher-demo')
+    }
+  })
+
+  it('calls wrangler secret put with --env demo and resolved worker name when both secrets absent', async () => {
+    const main = await getMain()
+    const listJson = JSON.stringify([])
+    const mockExec = makeExecFileSync(listJson)
+
+    const mockWrangler = JSON.stringify({
+      name: 'domain-drop-watcher',
+      env: { demo: { name: 'domain-drop-watcher-demo' } }
+    })
+    const mockReadFileSync: ReadFileSyncFn = () => mockWrangler
+
+    await main({ execFileSync: mockExec, args: ['--env', 'demo'], readFileSync: mockReadFileSync })
+
+    const putCalls = mockExec.calls.filter(([, args]) => args[1] === 'put')
+    expect(putCalls.length).toBe(2)
+
+    for (const [cmd, args] of putCalls) {
+      expect(cmd).toBe('wrangler')
+      expect(args).toContain('domain-drop-watcher-demo')
+      expect(args).toContain('--env')
+      const envIdx = args.indexOf('--env')
+      expect(args[envIdx + 1]).toBe('demo')
+    }
+  })
+
+  it('uses default worker name domain-drop-watcher when no --env flag is passed', async () => {
+    const main = await getMain()
+    const listJson = JSON.stringify([])
+    const mockExec = makeExecFileSync(listJson)
+
+    await main({ execFileSync: mockExec, args: [] })
+
+    const putCalls = mockExec.calls.filter(([, args]) => args[1] === 'put')
+    expect(putCalls.length).toBe(2)
+
+    for (const [, args] of putCalls) {
+      expect(args).toContain('domain-drop-watcher')
+      expect(args).not.toContain('--env')
+    }
   })
 })
