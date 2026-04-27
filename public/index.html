@@ -346,7 +346,7 @@
     </div>
 
     <div id="settings-subtabs" style="display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:20px; overflow-x:auto;">
-      <button class="tab-btn active" data-subtab="users" style="border-bottom-color:var(--red)">Users</button>
+      <button class="tab-btn active" data-subtab="users" style="border-bottom-color:var(--accent)">Users</button>
       <button class="tab-btn" data-subtab="passkeys">Passkeys</button>
       <button class="tab-btn" data-subtab="sessions">Sessions</button>
       <button class="tab-btn" data-subtab="config">Config</button>
@@ -365,6 +365,9 @@
               <input type="email" id="new-user-email" placeholder="user@example.com" autocomplete="off">
             </div>
           </div>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5">
+            Adds the address to the sign-in allowlist. <strong>No email is sent.</strong> The user can then sign in by entering their email on the login page (a 6-digit code is mailed to them) or by using a passkey they've previously registered.
+          </p>
           <div id="add-user-error" class="notice notice-error" style="display:none; margin-top:10px" role="alert"></div>
           <div style="margin-top:12px; display:flex; gap:8px;">
             <button class="btn btn-primary btn-sm" id="save-user-btn">Add</button>
@@ -641,7 +644,7 @@ document.querySelectorAll("#settings-subtabs .tab-btn[data-subtab]").forEach(fun
     var sub = btn.dataset.subtab;
     document.querySelectorAll("#settings-subtabs .tab-btn").forEach(function(b) {
       b.classList.toggle("active", b === btn);
-      b.style.borderBottomColor = b === btn ? "var(--red)" : "";
+      b.style.borderBottomColor = b === btn ? "var(--accent)" : "";
     });
     document.querySelectorAll(".subtab-panel").forEach(function(p) {
       p.style.display = p.id === "subtab-" + sub ? "" : "none";

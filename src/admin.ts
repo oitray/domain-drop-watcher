@@ -970,9 +970,14 @@ textarea{resize:vertical;min-height:72px;font-family:monospace;font-size:0.85rem
   ${bannerHtml}
   ${emptyAllowlist ? `
   <form id="token-form">
-    <label for="admin-token">ADMIN_TOKEN</label>
-    <textarea id="admin-token" name="admin-token" rows="3" autofocus></textarea>
+    <label for="bootstrap-email">Your email</label>
+    <input type="email" id="bootstrap-email" name="bootstrap-email" required autocomplete="email" placeholder="you@example.com" autofocus>
+    <label for="admin-token" style="margin-top:12px">ADMIN_TOKEN</label>
+    <textarea id="admin-token" name="admin-token" rows="3" required></textarea>
     <button type="submit" class="btn btn-primary">Sign in with token</button>
+    <p style="font-size:12px;color:#888;margin-top:10px;line-height:1.4">
+      Your email becomes the first user. After signing in, register a passkey from <strong>Settings &rarr; Passkeys</strong> for normal logins.
+    </p>
   </form>
   ` : `
   <form id="email-form">
@@ -1082,14 +1087,18 @@ on('passkey-btn', 'click', async () => {
 on('token-form', 'submit', async (e) => {
   e.preventDefault();
   const token = document.getElementById('admin-token').value.trim();
+  const emailEl = document.getElementById('bootstrap-email');
+  const email = emailEl ? emailEl.value.trim() : '';
   const submitBtn = e.target.querySelector('button[type=submit]');
   submitBtn.disabled = true;
   setMsg('');
-  const r = await fetch('/login/admin-token', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+  const r = await fetch('/login/admin-token', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({token, email})});
   submitBtn.disabled = false;
   if (r.ok) {
     const j = await r.json();
     location.href = j.redirect || '/';
+  } else if (r.status === 400) {
+    setMsg('Email is required.', 'error');
   } else {
     setMsg('Invalid admin token.', 'error');
   }
@@ -1282,12 +1291,9 @@ async function handlePostLoginVerifyCode(
 
 // ---------------------------------------------------------------------------
 // POST /login/admin-token — break-glass: validate ADMIN_TOKEN, mint a session.
-// Sessions.email has a FK to users.email, so we ensure a sentinel bootstrap user
-// exists before creating the session row. Operators add real users via the
-// dashboard and can remove the sentinel afterward.
+// Requires the operator to provide their email so the session and any later
+// passkeys are bound to a real user from the start (rather than a sentinel).
 // ---------------------------------------------------------------------------
-
-const BREAK_GLASS_EMAIL = "bootstrap@admin.local";
 
 async function handlePostLoginAdminToken(
   req: Request,
@@ -1305,12 +1311,18 @@ async function handlePostLoginAdminToken(
     return jsonErr(400, "validation_failed", { details: ["body: invalid JSON"] });
   }
   const provided = typeof body["token"] === "string" ? body["token"].trim() : "";
+  const rawEmail = typeof body["email"] === "string" ? body["email"].trim() : "";
   const expected = resolveAdminToken(env);
+
+  if (!rawEmail || !rawEmail.includes("@")) {
+    return jsonErr(400, "validation_failed", { details: ["email: required"] });
+  }
+  const email = rawEmail.toLowerCase();
 
   if (!expected || !provided || !timingSafeEqual(provided, expected)) {
     ctx.waitUntil(
       logAuthEvent(db, {
-        email: null,
+        email,
         event_type: "login_fail",
         auth_method: "bearer-break-glass",
         ip_address: ip,
@@ -1327,11 +1339,11 @@ async function handlePostLoginAdminToken(
     .prepare(
       `INSERT OR IGNORE INTO users (email, user_id, added_at, disabled, role) VALUES (?, ?, ?, 0, 'admin')`,
     )
-    .bind(BREAK_GLASS_EMAIL, userId, now)
+    .bind(email, userId, now)
     .run();
 
   const session = await createSession(env, db, {
-    email: BREAK_GLASS_EMAIL,
+    email,
     authMethod: "bearer-break-glass",
     userAgent: ua,
     ipAddress: ip,
@@ -1339,7 +1351,7 @@ async function handlePostLoginAdminToken(
 
   ctx.waitUntil(
     logAuthEvent(db, {
-      email: BREAK_GLASS_EMAIL,
+      email,
       event_type: "login_ok",
       auth_method: "bearer-break-glass",
       ip_address: ip,
