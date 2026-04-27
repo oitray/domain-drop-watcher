@@ -54,8 +54,10 @@ export async function main(deps) {
 
   const args = deps?.args ?? process.argv.slice(2)
   const WORKER_NAME = resolveWorkerName(args, readFileFn)
-  const envIdx = args.indexOf('--env')
-  const ENV_FLAG = envIdx !== -1 ? ['--env', args[envIdx + 1]] : []
+  // Wrangler v3 doubles the env suffix when --name and --env are both set
+  // (e.g. `--name foo-demo --env demo` writes to `foo-demo-demo`). resolveWorkerName
+  // already produces the final name, so --env must NOT be forwarded to the secret commands.
+  const ENV_FLAG = []
 
   const adminTokenExists = checkSecretExists(WORKER_NAME, SECRET_NAME, runExecFileSync, ENV_FLAG)
   const sessionSecretExists = checkSecretExists(WORKER_NAME, SESSION_SECRET_NAME, runExecFileSync, ENV_FLAG)

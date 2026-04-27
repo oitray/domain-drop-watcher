@@ -188,16 +188,16 @@ describe('bootstrap-admin-token.mjs main()', () => {
 
     await main({ execFileSync: mockExec, args: ['--env', 'demo'], readFileSync: mockReadFileSync })
 
+    // wrangler doubles the env suffix when --name and --env are both set, so
+    // resolveWorkerName produces the final name and --env is NOT forwarded.
     const allCalls = mockExec.calls
     for (const [, args] of allCalls) {
-      expect(args).toContain('--env')
-      const envIdx = args.indexOf('--env')
-      expect(args[envIdx + 1]).toBe('demo')
+      expect(args).not.toContain('--env')
       expect(args).toContain('domain-drop-watcher-demo')
     }
   })
 
-  it('calls wrangler secret put with --env demo and resolved worker name when both secrets absent', async () => {
+  it('calls wrangler secret put with the resolved worker name and no --env flag when both secrets absent', async () => {
     const main = await getMain()
     const listJson = JSON.stringify([])
     const mockExec = makeExecFileSync(listJson)
@@ -216,9 +216,7 @@ describe('bootstrap-admin-token.mjs main()', () => {
     for (const [cmd, args] of putCalls) {
       expect(cmd).toBe('wrangler')
       expect(args).toContain('domain-drop-watcher-demo')
-      expect(args).toContain('--env')
-      const envIdx = args.indexOf('--env')
-      expect(args[envIdx + 1]).toBe('demo')
+      expect(args).not.toContain('--env')
     }
   })
 
