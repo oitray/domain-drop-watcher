@@ -23,6 +23,7 @@ export interface RdapLookupOpts {
   now?: () => number;
   expiringHorizonDays?: number;
   timeoutMs?: number;
+  rdapBaseUrl?: string;
 }
 
 // RFC 9224 bootstrap shape
@@ -136,10 +137,15 @@ export async function lookupDomain(
   const labels = lower.split(".");
   const tld = labels[labels.length - 1] ?? "";
 
-  const base = await resolveAuthoritativeBase(tld, {
-    bootstrapKV: opts?.bootstrapKV,
-    fetchImpl: fetchFn,
-  });
+  let base: string | null;
+  if (opts?.rdapBaseUrl) {
+    base = opts.rdapBaseUrl.replace(/\/$/, "");
+  } else {
+    base = await resolveAuthoritativeBase(tld, {
+      bootstrapKV: opts?.bootstrapKV,
+      fetchImpl: fetchFn,
+    });
+  }
 
   if (base === null) {
     return { status: "indeterminate", reason: "no-bootstrap" };

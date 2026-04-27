@@ -11,6 +11,8 @@ export interface Env {
   VERSION?: string;
   DEMO_MODE?: string; // "1" enables read-only public landing + daily reset
   DEMO_ADMIN_EMAIL?: string; // when DEMO_MODE=1, only this email can request a code
+  EMAIL_STUB?: string; // "1" skips real email send, writes code to KV instead
+  RDAP_BASE_URL?: string; // override RDAP root for tests
   ASSETS?: { fetch: (req: Request) => Promise<Response> };
 }
 

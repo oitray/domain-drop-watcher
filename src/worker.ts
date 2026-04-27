@@ -84,7 +84,7 @@ export default {
     if (due.length === 0) return;
 
     const lookups = await Promise.allSettled(
-      due.map((d) => lookupDomain(d.fqdn, { bootstrapKV: env.BOOTSTRAP })),
+      due.map((d) => lookupDomain(d.fqdn, { bootstrapKV: env.BOOTSTRAP, rdapBaseUrl: env.RDAP_BASE_URL })),
     );
 
     const updates: Parameters<typeof recordCheckBatch>[1] = [];

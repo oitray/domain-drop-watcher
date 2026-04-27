@@ -68,13 +68,16 @@ export async function issueLoginCode(
     .run();
 
   const from = await getAlertFromAddress(env, db) ?? "";
-  const sendPromise = env.EMAIL!.send({
-    from,
-    to: lower,
-    subject: `domain-drop-watcher sign-in code: ${code}`,
-    text: `Your 6-digit code: ${code}\n\nExpires in 10 minutes. Ignore if you didn't request sign-in. No links to click.`,
-  });
-  ctx.waitUntil(sendPromise);
+  if (env.EMAIL_STUB === "1") {
+    await env.BOOTSTRAP.put(`stub-code:${lower}`, code, { expirationTtl: 600 });
+  } else {
+    ctx.waitUntil(env.EMAIL!.send({
+      from,
+      to: lower,
+      subject: `domain-drop-watcher sign-in code: ${code}`,
+      text: `Your 6-digit code: ${code}\n\nExpires in 10 minutes. Ignore if you didn't request sign-in. No links to click.`,
+    }));
+  }
 
   return { codeSent: true };
 }

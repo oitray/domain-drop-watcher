@@ -674,6 +674,7 @@ async function handleCheckDomain(fqdn: string, env: Env): Promise<Response> {
   const result = await lookupDomain(fqdn, {
     bootstrapKV: env.BOOTSTRAP,
     fetchImpl: fetch,
+    rdapBaseUrl: env.RDAP_BASE_URL,
   });
 
   const now = Math.floor(Date.now() / 1000);
