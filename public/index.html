@@ -124,6 +124,10 @@
 </head>
 <body>
 
+<div id="demo-banner" style="display:none;background:#ff6b35;color:#fff;padding:8px 16px;text-align:center;font-weight:600">
+  Public demo — data resets daily at 04:00 UTC. Don't add real domains you care about.
+</div>
+
 <div id="break-glass-banner" role="status" aria-live="polite">
   You are signed in via break-glass. Add users at <strong>Settings &rarr; Users</strong> to enable email/passkey login.
 </div>
@@ -1241,6 +1245,10 @@ document.getElementById("logout-btn").addEventListener("click", async function()
 
 /* ---- Boot ---- */
 async function initDashboard() {
+  fetch("/api/demo-mode").then(r => r.json()).then(d => {
+    if (d.demo) document.getElementById("demo-banner").style.display = "block";
+  }).catch(() => {});
+
   var authed = await checkAuth();
   if (!authed) return;
 

@@ -1871,6 +1871,13 @@ export async function handleAdmin(
     return handlePasskeyLogin(req, env, env.DB, ctx);
   }
 
+  if (pathname === "/api/demo-mode" && method === "GET") {
+    return new Response(
+      JSON.stringify({ demo: env.DEMO_MODE === "1" }),
+      { headers: { "content-type": "application/json" } },
+    );
+  }
+
   const identity = await authenticate(req, env, env.DB);
 
   if (!identity) {
