@@ -12,6 +12,8 @@
 
 One click. No CLI. Works on Windows, macOS, and Linux. Full setup details below.
 
+![Demo — login → guest → browse tabs](docs/demo.gif)
+
 > **Try it live:** [ddw.oitlabs.com](https://ddw.oitlabs.com) — public demo, data resets daily at 04:00 UTC. Don't add real domains you care about.
 >
 > **Demo budget:** a Cloudflare spend alert is configured at $5/mo. CF spend alerts are informational, not enforced — if the alert fires, the demo will be disabled manually within 24h (route deleted via `wrangler routes delete`, cron paused via dashboard). The free tier covers normal use; the alert is a safety net for runaway scenarios.
