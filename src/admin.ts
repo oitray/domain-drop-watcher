@@ -922,6 +922,7 @@ async function handlePutWebhookHostAllowlist(
 
 async function handleGetLogin(env: Env, db: D1Database): Promise<Response> {
   const count = await userCount(db);
+  const demoMode = (env as Record<string, unknown>)["DEMO_MODE"] === "1";
   const emptyAllowlist = count === 0;
   const bannerHtml = emptyAllowlist
     ? `<div class="banner banner-warning">No users configured yet. Use your ADMIN_TOKEN below to log in and add the first user.</div>`
@@ -933,6 +934,7 @@ async function handleGetLogin(env: Env, db: D1Database): Promise<Response> {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Domain Drop Watcher &mdash; Sign in</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Barlow',Helvetica,system-ui,sans-serif;background:#f4f4f4;color:#414042;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px}
@@ -968,18 +970,10 @@ textarea{resize:vertical;min-height:72px;font-family:monospace;font-size:0.85rem
   <h1>Domain Drop Watcher</h1>
   <p class="subtitle">Sign in to your dashboard</p>
   ${bannerHtml}
-  ${emptyAllowlist ? `
-  <form id="token-form">
-    <label for="bootstrap-email">Your email</label>
-    <input type="email" id="bootstrap-email" name="bootstrap-email" required autocomplete="email" placeholder="you@example.com" autofocus>
-    <label for="admin-token" style="margin-top:12px">ADMIN_TOKEN</label>
-    <textarea id="admin-token" name="admin-token" rows="3" required></textarea>
-    <button type="submit" class="btn btn-primary">Sign in with token</button>
-    <p style="font-size:12px;color:#888;margin-top:10px;line-height:1.4">
-      Your email becomes the first user. After signing in, register a passkey from <strong>Settings &rarr; Passkeys</strong> for normal logins.
-    </p>
-  </form>
-  ` : `
+  ${demoMode ? `
+  <a href="/" class="btn btn-primary" style="display:block;text-decoration:none;margin-bottom:4px">Sign in as guest</a>
+  <div class="divider">or</div>
+  ` : ``}
   <form id="email-form">
     <label for="email">Email address</label>
     <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com">
@@ -1005,12 +999,12 @@ textarea{resize:vertical;min-height:72px;font-family:monospace;font-size:0.85rem
       </form>
     </div>
   </details>
-  `}
   <div id="msg" role="alert" aria-live="polite"></div>
 </div>
 <script src="/vendor/simplewebauthn-browser.js"></script>
 <script>
 let pendingEmail = '';
+const DEMO = ${demoMode ? 'true' : 'false'};
 
 function setMsg(text, type) {
   const el = document.getElementById('msg');
@@ -1018,9 +1012,17 @@ function setMsg(text, type) {
   el.className = type || '';
 }
 
+function demoGuard(e) {
+  if (!DEMO) return false;
+  e.preventDefault();
+  setMsg('This is a demo — click "Sign in as guest" above to explore.', 'error');
+  return true;
+}
+
 function on(id, evt, fn) { const el = document.getElementById(id); if (el) el.addEventListener(evt, fn); }
 
 on('email-form', 'submit', async (e) => {
+  if (demoGuard(e)) return;
   e.preventDefault();
   pendingEmail = document.getElementById('email').value;
   const submitBtn = e.target.querySelector('button[type=submit]');
@@ -1046,6 +1048,7 @@ on('back-to-email-btn', 'click', () => {
 });
 
 on('code-form', 'submit', async (e) => {
+  if (demoGuard(e)) return;
   e.preventDefault();
   const code = document.getElementById('code').value;
   const submitBtn = e.target.querySelector('button[type=submit]');
@@ -1058,7 +1061,8 @@ on('code-form', 'submit', async (e) => {
   else { setMsg('Invalid or expired code. Please try again.', 'error'); }
 });
 
-on('passkey-btn', 'click', async () => {
+on('passkey-btn', 'click', async (e) => {
+  if (demoGuard(e)) return;
   const btn = document.getElementById('passkey-btn');
   btn.disabled = true;
   btn.textContent = 'Waiting for passkey…';
@@ -1087,7 +1091,7 @@ on('passkey-btn', 'click', async () => {
 on('token-form', 'submit', async (e) => {
   e.preventDefault();
   const token = document.getElementById('admin-token').value.trim();
-  const emailEl = document.getElementById('bootstrap-email');
+  const emailEl = document.getElementById('bootstrap-email') || document.getElementById('breakglass-email');
   const email = emailEl ? emailEl.value.trim() : '';
   const submitBtn = e.target.querySelector('button[type=submit]');
   submitBtn.disabled = true;
@@ -1314,10 +1318,20 @@ async function handlePostLoginAdminToken(
   const rawEmail = typeof body["email"] === "string" ? body["email"].trim() : "";
   const expected = resolveAdminToken(env);
 
-  if (!rawEmail || !rawEmail.includes("@")) {
-    return jsonErr(400, "validation_failed", { details: ["email: required"] });
+  let email = rawEmail.toLowerCase();
+  if (!email || !email.includes("@")) {
+    const fallback = (env as Record<string, unknown>)["DEMO_ADMIN_EMAIL"];
+    if (typeof fallback === "string" && fallback.includes("@")) {
+      email = fallback.toLowerCase();
+    } else {
+      const row = await db.prepare("SELECT email FROM users ORDER BY created_at ASC LIMIT 1").first<{email: string}>();
+      if (row?.email) {
+        email = row.email.toLowerCase();
+      } else {
+        return jsonErr(400, "validation_failed", { details: ["email: required (no users exist — use the bootstrap form)"] });
+      }
+    }
   }
-  const email = rawEmail.toLowerCase();
 
   if (!expected || !provided || !timingSafeEqual(provided, expected)) {
     ctx.waitUntil(
@@ -1927,6 +1941,60 @@ async function handleAuthHealth(env: Env, db: D1Database): Promise<Response> {
 // ---------------------------------------------------------------------------
 // Main request handler
 // ---------------------------------------------------------------------------
+// Demo guest mode — hardcoded sample data for unauthenticated visitors
+// ---------------------------------------------------------------------------
+
+function agoUnix(ms: number): number { return Math.floor((Date.now() - ms) / 1000); }
+
+function buildDemoDomains() {
+  return [
+    { fqdn: "checkout.example.com", label: "Primary storefront", cadence_minutes: 15, last_status: "registered", last_checked_at: agoUnix(180_000), paused: false, channel_ids: ["ch-email-1", "ch-webhook-1"] },
+    { fqdn: "api.acmecorp.io", label: "", cadence_minutes: 60, last_status: "registered", last_checked_at: agoUnix(3_600_000), paused: false, channel_ids: ["ch-webhook-1"] },
+    { fqdn: "legacy-portal.net", label: "Sunset Q3", cadence_minutes: 1440, last_status: "dropping", last_checked_at: agoUnix(7_200_000), paused: false, channel_ids: ["ch-email-1"] },
+    { fqdn: "brand-typo-squat.com", label: "Defensive registration", cadence_minutes: 360, last_status: "available", last_checked_at: agoUnix(900_000), paused: true, channel_ids: [] },
+  ];
+}
+
+function buildDemoChannels() {
+  return [
+    { id: "ch-email-1", type: "email", target: "alerts@example.com", label: "Ops Team", disabled: false, last_delivery_result: "ok", last_delivery_at: agoUnix(86_400_000) },
+    { id: "ch-webhook-1", type: "webhook", target: "https://hooks.slack.example.com/services/T00/B00/xxxx", label: "Slack #domains", disabled: false, last_delivery_result: "ok", last_delivery_at: agoUnix(43_200_000) },
+  ];
+}
+
+function buildDemoEvents() {
+  return [
+    { ts: agoUnix(900_000), kind: "status_change", fqdn: "brand-typo-squat.com", data: { from: "registered", to: "available" } },
+    { ts: agoUnix(3_600_000), kind: "alert_sent", fqdn: "brand-typo-squat.com", data: { channel: "email", target: "alerts@example.com" } },
+    { ts: agoUnix(7_200_000), kind: "status_change", fqdn: "legacy-portal.net", data: { from: "registered", to: "dropping" } },
+    { ts: agoUnix(86_400_000), kind: "check", fqdn: "checkout.example.com", data: { status: "registered" } },
+    { ts: agoUnix(86_400_000), kind: "check", fqdn: "api.acmecorp.io", data: { status: "registered" } },
+  ];
+}
+
+function handleDemoGuest(pathname: string, _url: URL): Response {
+  if (pathname === "/domains") return json(buildDemoDomains());
+  if (pathname === "/channels") return json(buildDemoChannels());
+  if (pathname === "/events") return json(buildDemoEvents());
+  if (pathname === "/budget") return json({ peakDuePerMinute: 4, d1WritesPerDay: 287, headroom: 41, withinFreeTier: true, warnings: [] });
+  if (pathname === "/config/app") return json({ alert_from_address: "noreply@example.com", webhook_host_allowlist: ["hooks.slack.example.com"] });
+  if (pathname === "/users") return json([
+    { email: "admin@example.com", added_at: agoUnix(604_800_000), last_login_at: agoUnix(3_600_000), disabled: false, role: "admin" },
+    { email: "ops@example.com", added_at: agoUnix(259_200_000), last_login_at: agoUnix(86_400_000), disabled: false, role: "admin" },
+  ]);
+  if (pathname === "/sessions") return json([]);
+  if (pathname === "/passkeys") return json([]);
+  if (pathname === "/auth/health") return json({ session: "guest", method: "demo-guest" });
+  const domainMatch = /^\/domains\/([^/]+)$/.exec(pathname);
+  if (domainMatch) {
+    const fqdn = decodeURIComponent(domainMatch[1] ?? "").toLowerCase();
+    const d = buildDemoDomains().find(x => x.fqdn === fqdn);
+    if (d) return json(d);
+  }
+  return jsonErr(401, "unauthorized");
+}
+
+// ---------------------------------------------------------------------------
 
 export async function handleAdmin(
   req: Request,
@@ -2041,6 +2109,11 @@ export async function handleAdmin(
   }
 
   const identity = await authenticate(req, env, env.DB);
+  const demoMode = (env as Record<string, unknown>)["DEMO_MODE"] === "1";
+
+  if (!identity && demoMode && method === "GET") {
+    return handleDemoGuest(pathname, url);
+  }
 
   if (!identity) {
     return jsonErr(401, "unauthorized");

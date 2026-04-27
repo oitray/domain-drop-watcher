@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Domain Drop Watcher</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -156,6 +157,12 @@
   </div>
 </div>
 
+<div id="guest-banner" style="display:none;background:var(--accent-soft);color:var(--accent);padding:8px 16px;text-align:center;font-weight:500;font-size:13px;border-bottom:1px solid var(--border)">
+  Live demo &mdash; <a href="https://github.com/oitray/domain-drop-watcher" style="color:var(--accent);font-weight:600">deploy your own</a> in under 5 minutes.
+</div>
+
+<div id="guest-toast" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--charcoal);color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:2000;transition:opacity .3s;box-shadow:0 4px 12px rgba(0,0,0,.2)"></div>
+
 <div id="break-glass-banner" role="status" aria-live="polite">
   You are signed in via break-glass. Add users at <strong>Settings &rarr; Users</strong> to enable email/passkey login.
 </div>
@@ -240,11 +247,11 @@
       <div class="card-header">Bulk Add Domains</div>
       <div class="card-body">
         <p style="font-size:13px; color:var(--gray); margin-bottom:12px">
-          One domain per line. Optional: <code>fqdn,cadenceMin,label</code>
+          One domain per line. All start at 60-min cadence.
         </p>
         <div class="form-row">
           <label for="bulk-input">Domains</label>
-          <textarea id="bulk-input" placeholder="example.com&#10;anotherdomain.io,5,Priority domain&#10;dropcandidate.net,15"></textarea>
+          <textarea id="bulk-input" placeholder="example.com&#10;anotherdomain.io&#10;dropcandidate.net"></textarea>
         </div>
         <div style="display:flex; gap:8px; margin-top:12px;">
           <button class="btn btn-secondary" id="bulk-preview-btn">Preview</button>
@@ -347,8 +354,6 @@
 
     <div id="settings-subtabs" style="display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:20px; overflow-x:auto;">
       <button class="tab-btn active" data-subtab="users" style="border-bottom-color:var(--accent)">Users</button>
-      <button class="tab-btn" data-subtab="passkeys">Passkeys</button>
-      <button class="tab-btn" data-subtab="sessions">Sessions</button>
       <button class="tab-btn" data-subtab="config">Config</button>
     </div>
 
@@ -381,75 +386,12 @@
                 <th>Email</th>
                 <th>Added</th>
                 <th>Last Login</th>
-                <th>Sessions</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody id="users-tbody">
-              <tr><td colspan="6" class="loading">Loading&hellip;</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <div id="subtab-passkeys" class="subtab-panel" style="display:none">
-      <div class="card">
-        <div class="card-header">
-          Passkeys
-          <button class="btn btn-primary btn-sm" id="register-passkey-btn" style="margin-left:auto">+ Register Passkey</button>
-        </div>
-        <div id="register-passkey-form" style="display:none; padding:16px 20px; border-bottom:1px solid var(--border); background:#fafafa;">
-          <div class="form-row">
-            <label for="passkey-device-name">Device name (optional)</label>
-            <input type="text" id="passkey-device-name" placeholder="MacBook Touch ID" autocomplete="off" style="max-width:300px">
-          </div>
-          <div id="register-passkey-error" class="notice notice-error" style="display:none; margin-top:8px" role="alert"></div>
-          <div style="margin-top:12px; display:flex; gap:8px;">
-            <button class="btn btn-primary btn-sm" id="register-passkey-start-btn">Register</button>
-            <button class="btn btn-secondary btn-sm" id="cancel-passkey-btn">Cancel</button>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Device</th>
-                <th>Registered</th>
-                <th>Last Used</th>
-                <th>Transports</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="passkeys-tbody">
               <tr><td colspan="5" class="loading">Loading&hellip;</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <div id="subtab-sessions" class="subtab-panel" style="display:none">
-      <div class="card">
-        <div class="card-header">
-          Active Sessions
-          <button class="btn btn-danger btn-sm" id="revoke-all-sessions-btn" style="margin-left:auto">Revoke all my sessions</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Method</th>
-                <th>IP Address</th>
-                <th>User Agent</th>
-                <th>Created</th>
-                <th>Expires</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="sessions-tbody">
-              <tr><td colspan="6" class="loading">Loading&hellip;</td></tr>
             </tbody>
           </table>
         </div>
@@ -477,32 +419,6 @@
           <div id="config-alert-from-effective" style="font-size:12px; color:var(--gray); margin-bottom:10px; min-height:1em"></div>
           <div id="config-alert-from-error" class="notice notice-error" style="display:none; margin-bottom:8px" role="alert"></div>
           <button class="btn btn-primary btn-sm" id="config-alert-from-save">Save</button>
-        </div>
-      </div>
-
-      <div class="card" id="config-allowlist-card">
-        <div class="card-header">Webhook Allowlist</div>
-        <div class="card-body">
-          <details style="margin-bottom:12px; font-size:13px; color:var(--gray)">
-            <summary style="cursor:pointer; font-weight:500">Help</summary>
-            <div style="margin-top:8px; line-height:1.6">
-              Comma-separated hostname globs for the webhook SSRF allowlist. Each entry is a hostname
-              only &mdash; no <code>://</code>, no spaces. Wildcards are supported (e.g.
-              <code>*.webhook.office.com</code>). Leave blank to use the built-in default:
-              Teams, Slack, and Discord.<br>
-              <small>Default: <code id="config-allowlist-default-display"></code></small>
-            </div>
-          </details>
-          <div class="form-row" style="margin-bottom:8px">
-            <label for="config-allowlist-input" style="font-size:13px">Allowlist (comma-separated hosts)</label>
-            <textarea id="config-allowlist-input" rows="3"
-              placeholder="*.webhook.office.com,hooks.slack.com,discord.com"
-              style="width:100%; max-width:480px; font-family:monospace; font-size:13px; resize:vertical"></textarea>
-          </div>
-          <div id="config-allowlist-preview" style="font-size:12px; color:var(--gray); margin-bottom:8px; min-height:1em"></div>
-          <div id="config-allowlist-effective" style="font-size:12px; color:var(--gray); margin-bottom:10px; min-height:1em"></div>
-          <div id="config-allowlist-error" class="notice notice-error" style="display:none; margin-bottom:8px" role="alert"></div>
-          <button class="btn btn-primary btn-sm" id="config-allowlist-save">Save</button>
         </div>
       </div>
 
@@ -600,6 +516,11 @@ function announce(msg) {
 
 async function apiFetch(path, opts) {
   opts = opts || {};
+  var method = (opts.method || "GET").toUpperCase();
+  if (S_guest && method !== "GET") {
+    guestToast();
+    return new Response(JSON.stringify({error: "read_only"}), { status: 403, headers: {"Content-Type": "application/json"} });
+  }
   var headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
   return fetch(path, Object.assign({}, opts, { headers: headers, credentials: "same-origin" }));
 }
@@ -612,9 +533,30 @@ async function apiJson(path, opts) {
 }
 
 /* ---- Auth check ---- */
+var S_guest = false;
+function guestToast() {
+  var t = document.getElementById("guest-toast");
+  if (!t) return;
+  t.textContent = "Deploy your own instance to manage domains";
+  t.style.display = "block";
+  t.style.opacity = "1";
+  clearTimeout(t._tid);
+  t._tid = setTimeout(function() { t.style.opacity = "0"; setTimeout(function() { t.style.display = "none"; }, 300); }, 2500);
+}
+function guardGuest(fn) {
+  return function(e) { if (S_guest) { e.preventDefault(); e.stopPropagation(); guestToast(); return; } return fn.call(this, e); };
+}
 async function checkAuth() {
   var r = await apiJson("/domains");
   if (r.status === 401) { location.href = "/login"; return false; }
+  var h = await apiJson("/auth/health");
+  if (h.ok && h.body.method === "demo-guest") {
+    S_guest = true;
+    var gb = document.getElementById("guest-banner");
+    if (gb) gb.style.display = "block";
+    var db = document.getElementById("demo-banner");
+    if (db) db.style.display = "none";
+  }
   return true;
 }
 
@@ -650,8 +592,6 @@ document.querySelectorAll("#settings-subtabs .tab-btn[data-subtab]").forEach(fun
       p.style.display = p.id === "subtab-" + sub ? "" : "none";
     });
     if (sub === "users") loadUsersTab();
-    if (sub === "passkeys") loadPasskeysTab();
-    if (sub === "sessions") loadSessionsTab();
     if (sub === "config") loadConfigSubtab();
   });
 });
@@ -839,7 +779,7 @@ async function loadChannels() {
       : "<span style=\"color:var(--gray)\">&mdash;</span>";
     return "<tr>" +
       "<td>" + channelTypeChip(ch.type) + "</td>" +
-      "<td style=\"font-family:monospace;font-size:12px\">" + esc(maskTarget(ch.type, ch.target)) + "</td>" +
+      "<td style=\"font-family:monospace;font-size:12px\">" + esc(S_guest ? ch.target : maskTarget(ch.type, ch.target)) + "</td>" +
       "<td>" + (ch.label ? esc(ch.label) : "<span style=\"color:var(--gray)\">&mdash;</span>") + "</td>" +
       "<td><label class=\"toggle\"><input type=\"checkbox\"" + (ch.disabled ? " checked" : "") + " onchange=\"patchChannel(\'" + esc(ch.id) + "\', {disabled: this.checked})\"><span class=\"toggle-slider\"></span></label></td>" +
       "<td>" + lastDel + (ch.last_delivery_at ? "<br><span style=\"font-size:11px;color:var(--gray)\">" + relTime(ch.last_delivery_at) + "</span>" : "") + "</td>" +
@@ -974,7 +914,6 @@ async function loadUsersTab() {
       "<td>" + esc(u.email) + "</td>" +
       "<td style=\"color:var(--gray);font-size:13px\">" + relTime(u.added_at) + "</td>" +
       "<td style=\"color:var(--gray);font-size:13px\">" + (u.last_login_at ? relTime(u.last_login_at) : "—") + "</td>" +
-      "<td style=\"text-align:center\">" + (u.activeSessions || 0) + "</td>" +
       "<td>" + statusHtml + "</td>" +
       "<td><div class=\"actions\">" +
         "<button class=\"btn btn-secondary btn-sm\" onclick=\"toggleUser(\'" + esc(u.email) + "\', \'" + toggleAction + "\')\">" + toggleLabel + "</button>" +
@@ -1032,129 +971,6 @@ function showUserError(msg) {
   addUserError.textContent = msg; addUserError.style.display = "block";
 }
 
-/* ---- Settings: Passkeys tab ---- */
-async function loadPasskeysTab() {
-  var tbody = document.getElementById("passkeys-tbody");
-  if (!tbody) return;
-  var r = await apiJson("/passkeys");
-  if (!r.ok) { tbody.innerHTML = "<tr><td colspan=\"5\" class=\"empty\">Failed to load passkeys.</td></tr>"; return; }
-  var passkeys = r.body;
-  if (!passkeys.length) {
-    tbody.innerHTML = "<tr><td colspan=\"5\" class=\"empty\">No passkeys registered yet.</td></tr>";
-    return;
-  }
-  tbody.innerHTML = passkeys.map(function(p) {
-    var transports = Array.isArray(p.transports) ? p.transports.join(", ") : (p.transports || "—");
-    return "<tr>" +
-      "<td>" + esc(p.deviceName || "Unnamed device") + "</td>" +
-      "<td style=\"font-size:13px;color:var(--gray)\">" + absTime(p.createdAt) + "</td>" +
-      "<td style=\"font-size:13px;color:var(--gray)\">" + (p.lastUsedAt ? relTime(p.lastUsedAt) : "—") + "</td>" +
-      "<td style=\"font-size:12px;color:var(--gray)\">" + esc(transports) + "</td>" +
-      "<td><button class=\"btn btn-danger btn-sm\" onclick=\"deletePasskey(\'" + esc(p.credentialId) + "\')\" aria-label=\"Remove passkey\">Remove</button></td>" +
-      "</tr>";
-  }).join("");
-}
-
-async function deletePasskey(credentialId) {
-  if (!confirm("Remove this passkey?")) return;
-  var r = await apiJson("/passkeys/" + encodeURIComponent(credentialId), { method: "DELETE" });
-  if (!r.ok) { alert("Failed: " + (r.body.error || "unknown")); return; }
-  announce("Passkey removed");
-  loadPasskeysTab();
-}
-
-var registerPasskeyBtn = document.getElementById("register-passkey-btn");
-var registerPasskeyForm = document.getElementById("register-passkey-form");
-var cancelPasskeyBtn = document.getElementById("cancel-passkey-btn");
-var registerPasskeyError = document.getElementById("register-passkey-error");
-
-registerPasskeyBtn.addEventListener("click", function() {
-  registerPasskeyForm.style.display = registerPasskeyForm.style.display === "none" ? "block" : "none";
-  registerPasskeyError.style.display = "none";
-});
-cancelPasskeyBtn.addEventListener("click", function() {
-  registerPasskeyForm.style.display = "none"; registerPasskeyError.style.display = "none";
-});
-
-document.getElementById("register-passkey-start-btn").addEventListener("click", async function() {
-  registerPasskeyError.style.display = "none";
-  var btn = this;
-  btn.disabled = true; btn.textContent = "Waiting…";
-  try {
-    var beginRes = await apiFetch("/passkeys/register/begin", { method: "POST", body: JSON.stringify({}) });
-    if (!beginRes.ok) {
-      var beginBody = await beginRes.json();
-      showPasskeyError(beginBody.error || "Failed to start registration");
-      return;
-    }
-    var options = await beginRes.json();
-    var attResp = await window.SimpleWebAuthnBrowser.startRegistration({ optionsJSON: options });
-    var deviceName = document.getElementById("passkey-device-name").value.trim() || null;
-    var finishPayload = Object.assign({}, attResp);
-    if (deviceName) finishPayload.deviceName = deviceName;
-    var finishRes = await apiFetch("/passkeys/register/finish", { method: "POST", body: JSON.stringify(finishPayload) });
-    var finishBody = await finishRes.json();
-    if (finishRes.ok && finishBody.ok) {
-      registerPasskeyForm.style.display = "none";
-      document.getElementById("passkey-device-name").value = "";
-      announce("Passkey registered");
-      loadPasskeysTab();
-    } else {
-      showPasskeyError(finishBody.reason || finishBody.error || "Registration failed");
-    }
-  } catch(err) {
-    if (err && err.name === "NotAllowedError") {
-      showPasskeyError("Registration cancelled or not allowed by the browser.");
-    } else {
-      showPasskeyError(String(err && err.message ? err.message : err));
-    }
-  } finally {
-    btn.disabled = false; btn.textContent = "Register";
-  }
-});
-
-function showPasskeyError(msg) {
-  registerPasskeyError.textContent = msg; registerPasskeyError.style.display = "block";
-}
-
-/* ---- Settings: Sessions tab ---- */
-async function loadSessionsTab() {
-  var tbody = document.getElementById("sessions-tbody");
-  if (!tbody) return;
-  var r = await apiJson("/sessions");
-  if (!r.ok) { tbody.innerHTML = "<tr><td colspan=\"6\" class=\"empty\">Failed to load sessions.</td></tr>"; return; }
-  var sessions = r.body;
-  if (!sessions.length) {
-    tbody.innerHTML = "<tr><td colspan=\"6\" class=\"empty\">No active sessions.</td></tr>";
-    return;
-  }
-  tbody.innerHTML = sessions.map(function(s) {
-    return "<tr>" +
-      "<td><code>" + esc(s.auth_method) + "</code></td>" +
-      "<td style=\"font-family:monospace;font-size:12px\">" + esc(s.ip_address || "—") + "</td>" +
-      "<td style=\"font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\" title=\"" + esc(s.user_agent || "") + "\">" + esc((s.user_agent || "—").slice(0, 60)) + "</td>" +
-      "<td style=\"font-size:13px;color:var(--gray)\">" + absTime(s.created_at) + "</td>" +
-      "<td style=\"font-size:13px;color:var(--gray)\">" + absTime(s.expires_at) + "</td>" +
-      "<td><button class=\"btn btn-danger btn-sm\" onclick=\"revokeSession(\'" + esc(s.session_id) + "\')\" aria-label=\"Revoke session\">Revoke</button></td>" +
-      "</tr>";
-  }).join("");
-}
-
-async function revokeSession(sessionId) {
-  if (!confirm("Revoke this session?")) return;
-  var r = await apiJson("/sessions/" + encodeURIComponent(sessionId), { method: "DELETE" });
-  if (!r.ok) { alert("Failed: " + (r.body.error || "unknown")); return; }
-  announce("Session revoked");
-  loadSessionsTab();
-}
-
-document.getElementById("revoke-all-sessions-btn").addEventListener("click", async function() {
-  if (!confirm("Revoke all your sessions? You will be signed out everywhere.")) return;
-  var r = await apiFetch("/sessions/revoke-all", { method: "POST" });
-  if (r.ok) { location.href = "/login"; }
-  else { var b = await r.json(); alert("Failed: " + (b.error || "unknown")); }
-});
-
 /* ---- Config subtab ---- */
 var _configLoaded = false;
 
@@ -1166,9 +982,6 @@ async function loadConfigSubtab() {
   if (!r.ok) return;
   var cfg = r.body;
 
-  var defaultAllowlist = (cfg.defaults && cfg.defaults.webhook_host_allowlist) || "";
-  var defDisplay = document.getElementById("config-allowlist-default-display");
-  if (defDisplay) defDisplay.textContent = defaultAllowlist;
 
   var alertInput = document.getElementById("config-alert-from-input");
   var alertEffective = document.getElementById("config-alert-from-effective");
@@ -1179,27 +992,6 @@ async function loadConfigSubtab() {
         ? "Currently in use: " + cfg.alert_from_address
         : "Unset — email alerts disabled";
     }
-  }
-
-  var allowlistInput = document.getElementById("config-allowlist-input");
-  var allowlistEffective = document.getElementById("config-allowlist-effective");
-  if (allowlistInput) {
-    allowlistInput.value = cfg.webhook_host_allowlist || "";
-    if (allowlistEffective) {
-      allowlistEffective.textContent = cfg.webhook_host_allowlist
-        ? "Currently in use: " + cfg.webhook_host_allowlist
-        : "Unset — using built-in default: " + defaultAllowlist;
-    }
-  }
-
-  var allowlistPreview = document.getElementById("config-allowlist-preview");
-  if (allowlistInput && allowlistPreview) {
-    allowlistInput.addEventListener("input", function() {
-      var val = allowlistInput.value.trim();
-      if (!val) { allowlistPreview.textContent = ""; return; }
-      var entries = val.split(",").map(function(e) { return e.trim(); }).filter(function(e) { return e !== ""; });
-      allowlistPreview.textContent = "Parsed entries: " + entries.join(", ");
-    });
   }
 
   var alertSave = document.getElementById("config-alert-from-save");
@@ -1230,33 +1022,6 @@ async function loadConfigSubtab() {
     });
   }
 
-  var allowlistSave = document.getElementById("config-allowlist-save");
-  var allowlistError = document.getElementById("config-allowlist-error");
-  if (allowlistSave && allowlistInput) {
-    allowlistSave.addEventListener("click", async function() {
-      allowlistError.style.display = "none";
-      allowlistSave.disabled = true;
-      var res = await apiJson("/config/app/webhook_host_allowlist", {
-        method: "PUT",
-        body: JSON.stringify({ value: allowlistInput.value }),
-      });
-      allowlistSave.disabled = false;
-      if (!res.ok) {
-        allowlistError.textContent = res.body.reason || res.body.error || "Save failed";
-        allowlistError.style.display = "";
-      } else {
-        var saved = res.body.value || "";
-        allowlistInput.value = saved;
-        if (allowlistEffective) {
-          allowlistEffective.textContent = saved
-            ? "Currently in use: " + saved
-            : "Unset — using built-in default: " + defaultAllowlist;
-        }
-        announce("Webhook allowlist saved");
-        _configLoaded = false;
-      }
-    });
-  }
 }
 
 /* ---- Settings entry point ---- */
@@ -1266,6 +1031,25 @@ async function loadSettings() {
   var hasEmailError = emailChannels.some(function(c) { return c.last_delivery_result && c.last_delivery_result !== "ok"; });
   var card = document.getElementById("email-status-card");
   if (card) card.style.display = (emailChannels.length && hasEmailError) ? "block" : "none";
+  var budgetBody = document.getElementById("settings-budget-body");
+  if (budgetBody) {
+    var br = await apiJson("/budget");
+    if (br.ok) {
+      var b = br.body;
+      var lines = [];
+      lines.push("Peak requests/min: " + b.peakDuePerMinute + " / 45");
+      lines.push("Daily D1 writes: " + b.d1WritesPerDay + " / 100k");
+      lines.push("Headroom: " + b.headroom);
+      lines.push("Free tier: " + (b.withinFreeTier ? "Yes" : "No"));
+      if (b.warnings && b.warnings.length) lines.push("Warnings: " + b.warnings.join("; "));
+      budgetBody.textContent = lines.join("\n");
+      budgetBody.style.whiteSpace = "pre-line";
+      budgetBody.style.fontSize = "14px";
+      budgetBody.style.lineHeight = "2";
+    } else {
+      budgetBody.textContent = "Failed to load budget.";
+    }
+  }
 }
 
 /* ---- Logout ---- */
@@ -1293,11 +1077,13 @@ async function initDashboard() {
   await loadDomains();
   pauseBtn.textContent = S.paused ? "▶ Resume All" : "⏸ Pause All";
 
-  var sessionsRes = await apiJson("/sessions");
-  if (sessionsRes.ok && Array.isArray(sessionsRes.body) && sessionsRes.body.length) {
-    var current = sessionsRes.body[0];
-    if (current && current.auth_method === "bearer-break-glass") {
-      updateBreakGlassBanner("bearer-break-glass");
+  if (!S_guest) {
+    var sessionsRes = await apiJson("/sessions");
+    if (sessionsRes.ok && Array.isArray(sessionsRes.body) && sessionsRes.body.length) {
+      var current = sessionsRes.body[0];
+      if (current && current.auth_method === "bearer-break-glass") {
+        updateBreakGlassBanner("bearer-break-glass");
+      }
     }
   }
 }
