@@ -155,23 +155,23 @@ describe("formatDiscordEmbed", () => {
 
 describe("formatNativeEmail", () => {
   it("includes fqdn in subject line", () => {
-    const mime = formatNativeEmail(makeDomain({ fqdn: "drop.me" }), makeTransition(), "alerts@oit.co", "user@test.com");
+    const mime = formatNativeEmail(makeDomain({ fqdn: "drop.me" }), makeTransition(), "alerts@example.com", "user@test.com");
     expect(mime).toContain("drop.me");
   });
 
   it("includes newStatus in subject line", () => {
-    const mime = formatNativeEmail(makeDomain(), makeTransition({ newStatus: "dropping" }), "alerts@oit.co", "user@test.com");
+    const mime = formatNativeEmail(makeDomain(), makeTransition({ newStatus: "dropping" }), "alerts@example.com", "user@test.com");
     expect(mime).toContain("dropping");
   });
 
   it("sets From and To headers correctly", () => {
-    const mime = formatNativeEmail(makeDomain(), makeTransition(), "from@oit.co", "to@test.com");
-    expect(mime).toContain("From: from@oit.co");
+    const mime = formatNativeEmail(makeDomain(), makeTransition(), "from@example.com", "to@test.com");
+    expect(mime).toContain("From: from@example.com");
     expect(mime).toContain("To: to@test.com");
   });
 
   it("includes MIME-Version header", () => {
-    const mime = formatNativeEmail(makeDomain(), makeTransition(), "from@oit.co", "to@test.com");
+    const mime = formatNativeEmail(makeDomain(), makeTransition(), "from@example.com", "to@test.com");
     expect(mime).toContain("MIME-Version: 1.0");
   });
 });
@@ -214,7 +214,7 @@ describe("dispatchAlert — email, no EMAIL binding", () => {
     const channel = makeChannel({ type: "email", target: "user@test.com" });
     const fetchMock = vi.fn(makeFetch(200));
     const results = await dispatchAlert(makeDomain(), makeTransition(), [channel], {
-      env: makeEnv({ EMAIL: undefined, ALERT_FROM_ADDRESS: "alerts@oit.co" }),
+      env: makeEnv({ EMAIL: undefined, ALERT_FROM_ADDRESS: "alerts@example.com" }),
       fetchImpl: fetchMock as unknown as typeof fetch,
     });
     expect(results[0]?.ok).toBe(false);
@@ -242,7 +242,7 @@ describe("dispatchAlert — email, fully configured", () => {
     const channel = makeChannel({ type: "email", target: "user@test.com" });
     const fetchMock = vi.fn(makeFetch(200));
     const results = await dispatchAlert(makeDomain(), makeTransition(), [channel], {
-      env: makeEnv({ EMAIL: { send: emailSend }, ALERT_FROM_ADDRESS: "alerts@oit.co" }),
+      env: makeEnv({ EMAIL: { send: emailSend }, ALERT_FROM_ADDRESS: "alerts@example.com" }),
       fetchImpl: fetchMock as unknown as typeof fetch,
     });
     expect(results[0]?.ok).toBe(true);
@@ -250,7 +250,7 @@ describe("dispatchAlert — email, fully configured", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     const [arg] = emailSend.mock.calls[0] as unknown as [unknown];
     const mime = arg instanceof Response ? await arg.text() : String(arg);
-    expect(mime).toContain("From: alerts@oit.co");
+    expect(mime).toContain("From: alerts@example.com");
     expect(mime).toContain("To: user@test.com");
     expect(mime).toContain("MIME-Version: 1.0");
   });

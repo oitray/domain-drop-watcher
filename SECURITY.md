@@ -4,7 +4,7 @@
 
 Use GitHub Private Vulnerability Reporting:
 
-https://github.com/oitray/domain-drop-watcher/security/advisories/new
+https://github.com/<owner>/<repo>/security/advisories/new
 
 Please include:
 - Description of the issue
