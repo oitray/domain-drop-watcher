@@ -12,6 +12,8 @@
 
 One click. No CLI. Works on Windows, macOS, and Linux. Full setup details below.
 
+> **Try it live:** [ddw.oitlabs.com](https://ddw.oitlabs.com) — public demo, data resets daily at 04:00 UTC. Don't add real domains you care about.
+
 ## About
 
 Domain Drop Watcher is a FOSS, self-hosted tool that watches a list of domains and alerts you the instant any of them enters `pendingDelete`, `redemptionPeriod`, or becomes available for re-registration. It runs as a single Cloudflare Worker on the free tier — no servers, no SaaS, no per-domain fees.
@@ -446,6 +448,12 @@ Conventions:
 
 PR checklist: typecheck passes, tests pass, no new runtime dependencies.
 
+
+## Support & Contributing
+
+Support is provided on a best-effort basis — this is shared as-is from one MSP to the rest of the community. Pull requests are always welcome. If you've hit a real problem in your shop and the fix could help others, that's exactly the kind of contribution this project exists for.
+
+Issues, questions, and PRs: [github.com/oitray/domain-drop-watcher](https://github.com/oitray/domain-drop-watcher/issues).
 
 ## License
 
