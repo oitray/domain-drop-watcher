@@ -1086,8 +1086,9 @@ describe("security headers", () => {
 // ---------------------------------------------------------------------------
 
 describe("GET /login", () => {
-  it("returns 200 HTML with login form", async () => {
+  it("returns 200 HTML with full login form when users exist", async () => {
     const env = makeEnv();
+    await mintSessionCookie(env, "alice@example.com");
     const res = await handleAdmin(noAuthReq("/login"), env, NOOP_CTX);
     expect(res.status).toBe(200);
     const ct = res.headers.get("content-type") ?? "";
@@ -1097,11 +1098,14 @@ describe("GET /login", () => {
     expect(body).toContain("passkey-section");
   });
 
-  it("shows empty-allowlist banner when no users exist", async () => {
+  it("shows empty-allowlist banner + only token form when no users exist", async () => {
     const env = makeEnv();
     const res = await handleAdmin(noAuthReq("/login"), env, NOOP_CTX);
     const body = await res.text();
     expect(body).toContain("No users configured yet");
+    expect(body).toContain("token-form");
+    expect(body).not.toContain('id="email-form"');
+    expect(body).not.toContain('id="passkey-section"');
   });
 
   it("does not show banner when users exist", async () => {

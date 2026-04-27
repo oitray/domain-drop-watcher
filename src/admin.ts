@@ -968,6 +968,13 @@ textarea{resize:vertical;min-height:72px;font-family:monospace;font-size:0.85rem
   <h1>Domain Drop Watcher</h1>
   <p class="subtitle">Sign in to your dashboard</p>
   ${bannerHtml}
+  ${emptyAllowlist ? `
+  <form id="token-form">
+    <label for="admin-token">ADMIN_TOKEN</label>
+    <textarea id="admin-token" name="admin-token" rows="3" autofocus></textarea>
+    <button type="submit" class="btn btn-primary">Sign in with token</button>
+  </form>
+  ` : `
   <form id="email-form">
     <label for="email">Email address</label>
     <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com">
@@ -983,7 +990,7 @@ textarea{resize:vertical;min-height:72px;font-family:monospace;font-size:0.85rem
   <div id="passkey-section">
     <button type="button" class="btn btn-secondary" id="passkey-btn">Sign in with a passkey</button>
   </div>
-  <details ${emptyAllowlist ? "open" : ""} id="break-glass-details">
+  <details id="break-glass-details">
     <summary>Break-glass: admin token</summary>
     <div class="details-body">
       <form id="token-form">
@@ -993,6 +1000,7 @@ textarea{resize:vertical;min-height:72px;font-family:monospace;font-size:0.85rem
       </form>
     </div>
   </details>
+  `}
   <div id="msg" role="alert" aria-live="polite"></div>
 </div>
 <script src="/vendor/simplewebauthn-browser.js"></script>
@@ -1005,7 +1013,9 @@ function setMsg(text, type) {
   el.className = type || '';
 }
 
-document.getElementById('email-form').addEventListener('submit', async (e) => {
+function on(id, evt, fn) { const el = document.getElementById(id); if (el) el.addEventListener(evt, fn); }
+
+on('email-form', 'submit', async (e) => {
   e.preventDefault();
   pendingEmail = document.getElementById('email').value;
   const submitBtn = e.target.querySelector('button[type=submit]');
@@ -1024,13 +1034,13 @@ document.getElementById('email-form').addEventListener('submit', async (e) => {
   }
 });
 
-document.getElementById('back-to-email-btn').addEventListener('click', () => {
+on('back-to-email-btn', 'click', () => {
   document.getElementById('code-form').style.display='none';
   document.getElementById('email-form').style.display='block';
   setMsg('');
 });
 
-document.getElementById('code-form').addEventListener('submit', async (e) => {
+on('code-form', 'submit', async (e) => {
   e.preventDefault();
   const code = document.getElementById('code').value;
   const submitBtn = e.target.querySelector('button[type=submit]');
@@ -1043,7 +1053,7 @@ document.getElementById('code-form').addEventListener('submit', async (e) => {
   else { setMsg('Invalid or expired code. Please try again.', 'error'); }
 });
 
-document.getElementById('passkey-btn').addEventListener('click', async () => {
+on('passkey-btn', 'click', async () => {
   const btn = document.getElementById('passkey-btn');
   btn.disabled = true;
   btn.textContent = 'Waiting for passkey…';
@@ -1069,7 +1079,7 @@ document.getElementById('passkey-btn').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('token-form').addEventListener('submit', async (e) => {
+on('token-form', 'submit', async (e) => {
   e.preventDefault();
   const token = document.getElementById('admin-token').value.trim();
   setMsg('');
