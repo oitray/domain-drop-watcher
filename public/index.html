@@ -128,6 +128,14 @@
   Public demo — data resets daily at 04:00 UTC. Don't add real domains you care about.
 </div>
 
+<div id="landing-cta" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000">
+  <div style="background:#fff;padding:40px;border-radius:8px;text-align:center;max-width:400px">
+    <h2 style="margin-bottom:16px;font-size:24px;color:var(--charcoal)">Domain Drop Watcher</h2>
+    <p style="margin-bottom:24px;color:var(--gray);font-size:14px">Monitor domain expiration and drops in real time.</p>
+    <a href="/login" class="btn btn-primary" data-hide-in-demo style="display:inline-flex">Sign In</a>
+  </div>
+</div>
+
 <div id="break-glass-banner" role="status" aria-live="polite">
   You are signed in via break-glass. Add users at <strong>Settings &rarr; Users</strong> to enable email/passkey login.
 </div>
@@ -1246,7 +1254,10 @@ document.getElementById("logout-btn").addEventListener("click", async function()
 /* ---- Boot ---- */
 async function initDashboard() {
   fetch("/api/demo-mode").then(r => r.json()).then(d => {
-    if (d.demo) document.getElementById("demo-banner").style.display = "block";
+    if (d.demo) {
+      document.getElementById("demo-banner").style.display = "block";
+      document.querySelectorAll("[data-hide-in-demo]").forEach(el => el.style.display = "none");
+    }
   }).catch(() => {});
 
   var authed = await checkAuth();
