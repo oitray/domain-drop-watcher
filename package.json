@@ -10,10 +10,12 @@
     "postdeploy": "wrangler d1 execute domain-drop-watcher --file=schema.sql --remote && node scripts/bootstrap-admin-token.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4",
+    "@playwright/test": "^1.59.1",
     "typescript": "^5",
     "vitest": "^1",
     "wrangler": "^3"
