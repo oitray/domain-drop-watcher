@@ -224,7 +224,7 @@ changes before committing.
 
 ## Operator surface
 
-![Dashboard — Domains tab with budget gauge, status chips, and channel badges](docs/dashboard.png)
+![Dashboard — Domains tab with budget gauge, status chips, and channel badges](docs/img/dashboard.png)
 
 **Where to find it:** `https://<your-worker-name>.<your-cf-account>.workers.dev/` — the same URL Cloudflare shows at the top of your Worker's page in the CF dashboard. The admin dashboard is served directly from the root path; there's no separate login URL, no port, no path suffix. Open the URL, paste your admin token into the login card, done.
 
