@@ -1,0 +1,10 @@
+SECURITY.md:7:https://github.com/oitray/domain-drop-watcher/security/advisories/new # (a) replace — GitHub org reference in URL; replace with placeholder
+package-lock.json:1831:      "integrity": "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==", # (c) keep — false positive; "QOwp" contains "O", not OIT reference
+test/alerts.test.ts:158:    const mime = formatNativeEmail(makeDomain({ fqdn: "drop.me" }), makeTransition(), "alerts@oit.co", "user@test.com"); # (b) delete — test-only fixture with OIT-only email address
+test/alerts.test.ts:163:    const mime = formatNativeEmail(makeDomain(), makeTransition({ newStatus: "dropping" }), "alerts@oit.co", "user@test.com"); # (b) delete — test-only fixture with OIT-only email address
+test/alerts.test.ts:168:    const mime = formatNativeEmail(makeDomain(), makeTransition(), "from@oit.co", "to@test.com"); # (b) delete — test-only fixture with OIT-only email address
+test/alerts.test.ts:169:    expect(mime).toContain("From: from@oit.co"); # (b) delete — test-only fixture with OIT-only email address
+test/alerts.test.ts:174:    const mime = formatNativeEmail(makeDomain(), makeTransition(), "from@oit.co", "to@test.com"); # (b) delete — test-only fixture with OIT-only email address
+test/alerts.test.ts:217:      env: makeEnv({ EMAIL: undefined, ALERT_FROM_ADDRESS: "alerts@oit.co" }), # (b) delete — test-only fixture with OIT-only email address
+test/alerts.test.ts:245:      env: makeEnv({ EMAIL: { send: emailSend }, ALERT_FROM_ADDRESS: "alerts@oit.co" }), # (b) delete — test-only fixture with OIT-only email address
+test/alerts.test.ts:253:    expect(mime).toContain("From: alerts@oit.co"); # (b) delete — test-only fixture with OIT-only email address
