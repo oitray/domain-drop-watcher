@@ -26,7 +26,7 @@
     "demo": {
       "name": "domain-drop-watcher-demo",
       "vars": { "DEMO_MODE": "1", "DEMO_ADMIN_EMAIL": "ray@oit.co" },
-      "routes": [{ "pattern": "ddw.oitlabs.com/*", "custom_domain": true }],
+      "custom_domains": ["ddw.oitlabs.com"],
       "d1_databases": [
         { "binding": "DB", "database_name": "domain-drop-watcher-demo", "database_id": "b5c26bf7-b635-4c05-97c3-85f47bb0a7d1" }
       ],
