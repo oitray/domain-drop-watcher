@@ -73,7 +73,7 @@ test.describe("alert channel", () => {
       if (el) el.style.display = "none";
     });
     await page.click("button[data-tab=channels]");
-    await expect(page.locator("text=w1")).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("text=w1").first()).toBeVisible({ timeout: 10_000 });
   });
 });
 
