@@ -1126,6 +1126,15 @@ async function handlePostLoginEmailCode(
     );
   }
 
+  if (env.DEMO_MODE === "1") {
+    const allowed = (env.DEMO_ADMIN_EMAIL || "").toLowerCase();
+    const requested = email.toLowerCase();
+    if (!allowed || requested !== allowed) {
+      // Rate-limit token already consumed above — this 404 is not a free probe.
+      return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });
+    }
+  }
+
   const result = await issueLoginCode(env, db, ctx, email);
 
   ctx.waitUntil(recordLoginAttempt(db, "email", email.toLowerCase(), "code_sent", now));
@@ -1194,6 +1203,15 @@ async function handlePostLoginVerifyCode(
         headers: { ...JSON_HEADERS, "Retry-After": String(rateDecision.retryAfterSec ?? 600) },
       },
     );
+  }
+
+  if (env.DEMO_MODE === "1") {
+    const allowed = (env.DEMO_ADMIN_EMAIL || "").toLowerCase();
+    const requested = email.toLowerCase();
+    if (!allowed || requested !== allowed) {
+      // Rate-limit token already consumed above — this 404 is not a free probe.
+      return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });
+    }
   }
 
   const redeemResult = await redeemLoginCode(env, db, email, code);

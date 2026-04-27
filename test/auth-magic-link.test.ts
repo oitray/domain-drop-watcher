@@ -498,6 +498,28 @@ describe("redeemLoginCode — re-redemption", () => {
   });
 });
 
+describe("issueLoginCode — DEMO_MODE gate (defense in depth)", () => {
+  it("issueLoginCode rejects non-admin email in DEMO_MODE (defense in depth)", async () => {
+    const sends: unknown[] = [];
+    const db = makeMagicLinkD1({
+      users: [
+        { email: "admin@example.com", disabled: 0 },
+        { email: "guest@example.com", disabled: 0 },
+      ],
+    }) as D1Database & { _codes: LoginCodeRow[] };
+    const env = makeEnv({
+      DB: db,
+      EMAIL: { send: async (msg) => { sends.push(msg); } },
+      DEMO_MODE: "1",
+      DEMO_ADMIN_EMAIL: "admin@example.com",
+    });
+    const ctx = makeCtx();
+
+    expect((await issueLoginCode(env, db, ctx, "guest@example.com")).codeSent).toBe(false);
+    expect((await issueLoginCode(env, db, ctx, "admin@example.com")).codeSent).toBe(true);
+  });
+});
+
 describe("redeemLoginCode — attempts_exhausted", () => {
   it("returns attempts_exhausted when verify_attempts >= 5", async () => {
     const env = makeEnv();

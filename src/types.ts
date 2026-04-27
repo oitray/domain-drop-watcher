@@ -10,6 +10,7 @@ export interface Env {
   WEBHOOK_HOST_ALLOWLIST?: string;
   VERSION?: string;
   DEMO_MODE?: string; // "1" enables read-only public landing + daily reset
+  DEMO_ADMIN_EMAIL?: string; // when DEMO_MODE=1, only this email can request a code
   ASSETS?: { fetch: (req: Request) => Promise<Response> };
 }
 

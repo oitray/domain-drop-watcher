@@ -1735,3 +1735,34 @@ describe("PUT /config/app/webhook_host_allowlist", () => {
     expect(getBody.webhook_host_allowlist).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// DEMO_MODE gate — /login/email-code + /login/verify-code
+// ---------------------------------------------------------------------------
+
+describe("DEMO_MODE gate — /login/email-code", () => {
+  it("/login/email-code returns 404 for non-admin email when DEMO_MODE=1", async () => {
+    const db = makeD1();
+    await db.prepare("INSERT INTO users (email,user_id,added_at,disabled) VALUES (?,?,?,0)").bind("admin@example.com", "u1", 0).run();
+    await db.prepare("INSERT INTO users (email,user_id,added_at,disabled) VALUES (?,?,?,0)").bind("guest@example.com", "u2", 0).run();
+    const env: Env = {
+      DB: db,
+      EVENTS: makeKV(),
+      BOOTSTRAP: makeKV(),
+      ADMIN_TOKEN: "correct-token",
+      SESSION_SECRET: "test-session-secret-placeholder-for-unit-tests",
+      VERSION: "0.1.0-test",
+      ALERT_FROM_ADDRESS: "no-reply@example.com",
+      EMAIL: { send: async () => {} },
+      DEMO_MODE: "1",
+      DEMO_ADMIN_EMAIL: "admin@example.com",
+    };
+    const req = new Request("https://x/login/email-code", {
+      method: "POST",
+      headers: { "content-type": "application/json", "origin": "https://x" },
+      body: JSON.stringify({ email: "guest@example.com" }),
+    });
+    const resp = await handleAdmin(req, env as any, NOOP_CTX);
+    expect(resp.status).toBe(404);
+  });
+});

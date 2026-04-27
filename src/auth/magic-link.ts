@@ -48,6 +48,13 @@ export async function issueLoginCode(
     return { codeSent: false };
   }
 
+  if (env.DEMO_MODE === "1") {
+    const allowed = (env.DEMO_ADMIN_EMAIL || "").toLowerCase();
+    if (!allowed || lower !== allowed) {
+      return { codeSent: false };
+    }
+  }
+
   const code = generateLoginCode();
   const hash = await hashLoginCode(env, lower, code);
   const now = Math.floor(Date.now() / 1000);
