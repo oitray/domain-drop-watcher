@@ -2062,14 +2062,15 @@ export async function handleAdmin(
   }
 
   const loginIp = req.headers.get("CF-Connecting-IP") ?? "unknown";
+  const skipRateLimit = env.EMAIL_STUB === "1";
 
   if (pathname === "/login/email-code" && method === "POST") {
-    if (!await checkRateLimit(env.BOOTSTRAP, loginIp, "email-code", 5, 900)) return jsonErr(429, "too_many_requests");
+    if (!skipRateLimit && !await checkRateLimit(env.BOOTSTRAP, loginIp, "email-code", 5, 900)) return jsonErr(429, "too_many_requests");
     return handlePostLoginEmailCode(req, env, env.DB, ctx);
   }
 
   if (pathname === "/login/verify-code" && method === "POST") {
-    if (!await checkRateLimit(env.BOOTSTRAP, loginIp, "verify-code", 10, 900)) return jsonErr(429, "too_many_requests");
+    if (!skipRateLimit && !await checkRateLimit(env.BOOTSTRAP, loginIp, "verify-code", 10, 900)) return jsonErr(429, "too_many_requests");
     return handlePostLoginVerifyCode(req, env, env.DB, ctx);
   }
 
@@ -2078,12 +2079,12 @@ export async function handleAdmin(
   }
 
   if (pathname === "/login/passkey" && method === "POST") {
-    if (!await checkRateLimit(env.BOOTSTRAP, loginIp, "passkey", 10, 900)) return jsonErr(429, "too_many_requests");
+    if (!skipRateLimit && !await checkRateLimit(env.BOOTSTRAP, loginIp, "passkey", 10, 900)) return jsonErr(429, "too_many_requests");
     return handlePasskeyLogin(req, env, env.DB, ctx);
   }
 
   if (pathname === "/login/admin-token" && method === "POST") {
-    if (!await checkRateLimit(env.BOOTSTRAP, loginIp, "admin-token", 5, 900)) return jsonErr(429, "too_many_requests");
+    if (!skipRateLimit && !await checkRateLimit(env.BOOTSTRAP, loginIp, "admin-token", 5, 900)) return jsonErr(429, "too_many_requests");
     return handlePostLoginAdminToken(req, env, env.DB, ctx);
   }
 
