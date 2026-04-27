@@ -1,0 +1,16 @@
+{
+  "name": "domain-drop-watcher-template",
+  "description": "Watch domains for drop/release events and alert when available. Multi-user dashboard, magic-link + passkey auth.",
+  "cloudflare": {
+    "label": "Domain Drop Watcher",
+    "products": ["Workers", "D1", "Email Routing"],
+    "categories": ["starter"],
+    "docs_url": "https://github.com/cloudflare/templates/tree/main/domain-drop-watcher-template#readme",
+    "bindings": {
+      "DB":        { "description": "D1 database for users, domains, alerts, audit events" },
+      "EVENTS":    { "description": "KV namespace for transient event log" },
+      "BOOTSTRAP": { "description": "KV namespace for first-run admin token" },
+      "EMAIL":     { "description": "Send Email binding for magic-link sign-in" }
+    }
+  }
+}
