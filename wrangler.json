@@ -26,7 +26,14 @@
     "demo": {
       "name": "domain-drop-watcher-demo",
       "vars": { "DEMO_MODE": "1" },
-      "routes": [{ "pattern": "ddw.oitlabs.com/*", "custom_domain": true }]
+      "routes": [{ "pattern": "ddw.oitlabs.com/*", "custom_domain": true }],
+      "d1_databases": [
+        { "binding": "DB", "database_name": "domain-drop-watcher-demo", "database_id": "b5c26bf7-b635-4c05-97c3-85f47bb0a7d1" }
+      ],
+      "kv_namespaces": [
+        { "binding": "EVENTS",    "id": "84ec0e98ca43461eb7302e51c638bc0c" },
+        { "binding": "BOOTSTRAP", "id": "5a64f27c0dbc4ca09fb3077ac997fa3d" }
+      ]
     }
   }
 }
