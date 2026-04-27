@@ -1082,10 +1082,17 @@ on('passkey-btn', 'click', async () => {
 on('token-form', 'submit', async (e) => {
   e.preventDefault();
   const token = document.getElementById('admin-token').value.trim();
+  const submitBtn = e.target.querySelector('button[type=submit]');
+  submitBtn.disabled = true;
   setMsg('');
-  const r = await fetch('/domains', {credentials:'same-origin',headers:{'Authorization':'Bearer '+token}});
-  if (r.ok) { location.href = '/'; }
-  else { setMsg('Invalid admin token.', 'error'); }
+  const r = await fetch('/login/admin-token', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+  submitBtn.disabled = false;
+  if (r.ok) {
+    const j = await r.json();
+    location.href = j.redirect || '/';
+  } else {
+    setMsg('Invalid admin token.', 'error');
+  }
 });
 </script>
 </body>
@@ -1259,6 +1266,82 @@ async function handlePostLoginVerifyCode(
       email: email.toLowerCase(),
       event_type: "login_ok",
       auth_method: "email-code",
+      ip_address: ip,
+      user_agent: ua,
+    }),
+  );
+
+  return new Response(JSON.stringify({ ok: true, redirect: "/" }), {
+    status: 200,
+    headers: {
+      ...JSON_HEADERS,
+      "Set-Cookie": serializeSessionCookie(session.cookieValue),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// POST /login/admin-token — break-glass: validate ADMIN_TOKEN, mint a session.
+// Sessions.email has a FK to users.email, so we ensure a sentinel bootstrap user
+// exists before creating the session row. Operators add real users via the
+// dashboard and can remove the sentinel afterward.
+// ---------------------------------------------------------------------------
+
+const BREAK_GLASS_EMAIL = "bootstrap@admin.local";
+
+async function handlePostLoginAdminToken(
+  req: Request,
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
+  const ua = req.headers.get("User-Agent") ?? null;
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return jsonErr(400, "validation_failed", { details: ["body: invalid JSON"] });
+  }
+  const provided = typeof body["token"] === "string" ? body["token"].trim() : "";
+  const expected = resolveAdminToken(env);
+
+  if (!expected || !provided || !timingSafeEqual(provided, expected)) {
+    ctx.waitUntil(
+      logAuthEvent(db, {
+        email: null,
+        event_type: "login_fail",
+        auth_method: "bearer-break-glass",
+        ip_address: ip,
+        user_agent: ua,
+        metadata: JSON.stringify({ reason: "invalid_admin_token" }),
+      }),
+    );
+    return jsonErr(401, "invalid_admin_token");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const userId = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO users (email, user_id, added_at, disabled, role) VALUES (?, ?, ?, 0, 'admin')`,
+    )
+    .bind(BREAK_GLASS_EMAIL, userId, now)
+    .run();
+
+  const session = await createSession(env, db, {
+    email: BREAK_GLASS_EMAIL,
+    authMethod: "bearer-break-glass",
+    userAgent: ua,
+    ipAddress: ip,
+  });
+
+  ctx.waitUntil(
+    logAuthEvent(db, {
+      email: BREAK_GLASS_EMAIL,
+      event_type: "login_ok",
+      auth_method: "bearer-break-glass",
       ip_address: ip,
       user_agent: ua,
     }),
@@ -1898,6 +1981,10 @@ export async function handleAdmin(
 
   if (pathname === "/login/passkey" && method === "POST") {
     return handlePasskeyLogin(req, env, env.DB, ctx);
+  }
+
+  if (pathname === "/login/admin-token" && method === "POST") {
+    return handlePostLoginAdminToken(req, env, env.DB, ctx);
   }
 
   if (pathname === "/api/demo-mode" && method === "GET") {
