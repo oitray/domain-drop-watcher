@@ -99,6 +99,18 @@ function jsonErr(status: number, message: string, extra?: Record<string, unknown
   return json({ error: message, ...extra }, status);
 }
 
+async function checkRateLimit(kv: KVNamespace, ip: string, action: string, max: number, windowSec: number): Promise<boolean> {
+  const key = `rate:${action}:${ip}`;
+  const now = Math.floor(Date.now() / 1000);
+  const raw = await kv.get(key);
+  let attempts: number[] = raw ? JSON.parse(raw) : [];
+  attempts = attempts.filter(t => now - t < windowSec);
+  if (attempts.length >= max) return false;
+  attempts.push(now);
+  await kv.put(key, JSON.stringify(attempts), { expirationTtl: windowSec });
+  return true;
+}
+
 function timingSafeEqual(a: string, b: string): boolean {
   const enc = new TextEncoder();
   const ab = enc.encode(a);
@@ -753,7 +765,7 @@ function validateWebhookHostAllowlist(value: string): { ok: true } | { ok: false
 
 function checkOrigin(req: Request): boolean {
   const origin = req.headers.get("origin");
-  if (!origin) return true;
+  if (!origin) return false;
   const url = new URL(req.url);
   return origin === url.origin;
 }
@@ -787,8 +799,6 @@ async function handlePutAlertFromAddress(
   identity: AuthIdentity,
   ctx: ExecutionContext,
 ): Promise<Response> {
-  if (!checkOrigin(req)) return jsonErr(403, "forbidden");
-
   let body: Record<string, unknown>;
   try {
     body = (await req.json()) as Record<string, unknown>;
@@ -857,8 +867,6 @@ async function handlePutWebhookHostAllowlist(
   identity: AuthIdentity,
   ctx: ExecutionContext,
 ): Promise<Response> {
-  if (!checkOrigin(req)) return jsonErr(403, "forbidden");
-
   let body: Record<string, unknown>;
   try {
     body = (await req.json()) as Record<string, unknown>;
@@ -1320,15 +1328,21 @@ async function handlePostLoginAdminToken(
 
   let email = rawEmail.toLowerCase();
   if (!email || !email.includes("@")) {
+    const demoMode = (env as Record<string, unknown>)["DEMO_MODE"] === "1";
     const fallback = (env as Record<string, unknown>)["DEMO_ADMIN_EMAIL"];
-    if (typeof fallback === "string" && fallback.includes("@")) {
+    if (demoMode && typeof fallback === "string" && fallback.includes("@")) {
       email = fallback.toLowerCase();
     } else {
-      const row = await db.prepare("SELECT email FROM users ORDER BY created_at ASC LIMIT 1").first<{email: string}>();
-      if (row?.email) {
-        email = row.email.toLowerCase();
+      const count = await userCount(db);
+      if (count <= 1) {
+        const row = await db.prepare("SELECT email FROM users ORDER BY created_at ASC LIMIT 1").first<{email: string}>();
+        if (row?.email) {
+          email = row.email.toLowerCase();
+        } else {
+          return jsonErr(400, "validation_failed", { details: ["email: required (no users exist — use the bootstrap form)"] });
+        }
       } else {
-        return jsonErr(400, "validation_failed", { details: ["email: required (no users exist — use the bootstrap form)"] });
+        return jsonErr(400, "validation_failed", { details: ["email: required when multiple users exist"] });
       }
     }
   }
@@ -1991,7 +2005,7 @@ function handleDemoGuest(pathname: string, _url: URL): Response {
     const d = buildDemoDomains().find(x => x.fqdn === fqdn);
     if (d) return json(d);
   }
-  return jsonErr(401, "unauthorized");
+  return jsonErr(404, "not_found");
 }
 
 // ---------------------------------------------------------------------------
@@ -2047,11 +2061,15 @@ export async function handleAdmin(
     return json({ empty: count === 0 });
   }
 
+  const loginIp = req.headers.get("CF-Connecting-IP") ?? "unknown";
+
   if (pathname === "/login/email-code" && method === "POST") {
+    if (!await checkRateLimit(env.BOOTSTRAP, loginIp, "email-code", 5, 900)) return jsonErr(429, "too_many_requests");
     return handlePostLoginEmailCode(req, env, env.DB, ctx);
   }
 
   if (pathname === "/login/verify-code" && method === "POST") {
+    if (!await checkRateLimit(env.BOOTSTRAP, loginIp, "verify-code", 10, 900)) return jsonErr(429, "too_many_requests");
     return handlePostLoginVerifyCode(req, env, env.DB, ctx);
   }
 
@@ -2060,10 +2078,12 @@ export async function handleAdmin(
   }
 
   if (pathname === "/login/passkey" && method === "POST") {
+    if (!await checkRateLimit(env.BOOTSTRAP, loginIp, "passkey", 10, 900)) return jsonErr(429, "too_many_requests");
     return handlePasskeyLogin(req, env, env.DB, ctx);
   }
 
   if (pathname === "/login/admin-token" && method === "POST") {
+    if (!await checkRateLimit(env.BOOTSTRAP, loginIp, "admin-token", 5, 900)) return jsonErr(429, "too_many_requests");
     return handlePostLoginAdminToken(req, env, env.DB, ctx);
   }
 
@@ -2111,16 +2131,27 @@ export async function handleAdmin(
   const identity = await authenticate(req, env, env.DB);
   const demoMode = (env as Record<string, unknown>)["DEMO_MODE"] === "1";
 
+  const DEMO_GUEST_PATHS = new Set([
+    "/domains", "/channels", "/events", "/budget", "/config/app",
+    "/users", "/sessions", "/passkeys", "/auth/health",
+  ]);
+
   if (!identity && demoMode && method === "GET") {
-    return handleDemoGuest(pathname, url);
+    if (DEMO_GUEST_PATHS.has(pathname) || /^\/domains\/[^/]+$/.test(pathname)) {
+      return handleDemoGuest(pathname, url);
+    }
+    return jsonErr(404, "not_found");
   }
 
   if (!identity) {
     return jsonErr(401, "unauthorized");
   }
 
-  // Log bearer break-glass on state-changing POSTs only; GETs excluded to reduce noise.
-  // A single row per POST is acceptable v1 granularity — documented here.
+  const isStateChanging = method !== "GET" && method !== "HEAD";
+  if (identity.method !== "bearer-break-glass" && isStateChanging && !checkOrigin(req)) {
+    return jsonErr(403, "forbidden");
+  }
+
   if (identity.method === "bearer-break-glass" && method === "POST") {
     ctx.waitUntil(
       logAuthEvent(env.DB, {

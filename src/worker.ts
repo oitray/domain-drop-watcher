@@ -21,8 +21,9 @@ export default {
     try {
       return await handleAdmin(req, env, ctx);
     } catch (err) {
+      console.error(err);
       return new Response(
-        JSON.stringify({ error: "internal", message: String(err) }),
+        JSON.stringify({ error: "internal" }),
         { status: 500, headers: { "content-type": "application/json" } },
       );
     }
