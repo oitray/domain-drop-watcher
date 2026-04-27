@@ -21,5 +21,12 @@
     "directory": "./public",
     "binding": "ASSETS",
     "run_worker_first": true
+  },
+  "env": {
+    "demo": {
+      "name": "domain-drop-watcher-demo",
+      "vars": { "DEMO_MODE": "1" },
+      "routes": [{ "pattern": "ddw.oitlabs.com/*", "custom_domain": true }]
+    }
   }
 }

@@ -9,6 +9,7 @@ export interface Env {
   ALERT_FROM_ADDRESS?: string;
   WEBHOOK_HOST_ALLOWLIST?: string;
   VERSION?: string;
+  DEMO_MODE?: string; // "1" enables read-only public landing + daily reset
   ASSETS?: { fetch: (req: Request) => Promise<Response> };
 }
 
